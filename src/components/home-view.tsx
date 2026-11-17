@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { ArrowRight, AudioWaveform, BookOpen, Check, Ear, Flame, Gauge, Mic, Target } from "lucide-react";
 import { PageHeader } from "@/components/app-shell";
+import { ArtworkFrame } from "@/components/artwork";
 import { Ring, Stars, WeekStrip } from "@/components/charts";
 import { rankForScore } from "@/components/diagnostic-lesson";
 import { Orb } from "@/components/orb";
@@ -133,8 +134,8 @@ export function HomeView() {
       : []),
     {
       icon: Mic,
-      title: "Read a text aloud",
-      detail: o.today.attempts ? `${o.today.attempts} recording${o.today.attempts === 1 ? "" : "s"} today` : "A full passage shows your rhythm and melody",
+      title: "Say a short sentence",
+      detail: o.today.attempts ? `${o.today.attempts} recording${o.today.attempts === 1 ? "" : "s"} today` : "Hard words first, then the whole sentence",
       href: "/practice",
       done: o.today.attempts > 0,
     },
@@ -152,7 +153,7 @@ export function HomeView() {
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="min-w-0 space-y-6">
-          <Card>
+          <Card className="aurora-wash">
             <CardContent className="flex flex-col gap-6 sm:flex-row sm:items-center">
               <div className="flex items-center gap-5 sm:flex-col sm:gap-3">
                 <Ring value={o.today.xp} max={o.goal} size={124}>
@@ -219,9 +220,24 @@ export function HomeView() {
             </CardHeader>
             <CardContent className="divide-y">
               {attempts.length === 0 && (
-                <p className="text-sm text-muted-foreground">
-                  Nothing recorded in {language.name} yet. Your first recording takes about two minutes.
-                </p>
+                <div className="flex flex-col gap-4 py-1 sm:flex-row sm:items-center">
+                  <ArtworkFrame
+                    name="emptyClarity"
+                    sizes="144px"
+                    className="aspect-[4/3] w-36 shrink-0 rounded-xl"
+                  />
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <p className="text-sm text-muted-foreground">
+                      Nothing recorded in {language.name} yet. Your first recording takes about two minutes.
+                    </p>
+                    <Button asChild size="sm" variant="outline" className="rounded-full">
+                      <Link href="/practice">
+                        Record your first text
+                        <ArrowRight />
+                      </Link>
+                    </Button>
+                  </div>
+                </div>
               )}
               {attempts.slice(0, 5).map((a) => (
                 <div key={a.id} className="flex items-center gap-4 py-2.5 first:pt-0 last:pb-0">

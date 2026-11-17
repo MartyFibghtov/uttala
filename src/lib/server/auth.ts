@@ -22,14 +22,26 @@ function resolveBaseUrl(): string {
   return process.env.BETTER_AUTH_URL || "http://localhost:3000";
 }
 
+function resolveSecret(): string {
+  const secret = process.env.BETTER_AUTH_SECRET?.trim();
+  if (secret) return secret;
+  // A shared fallback would let anyone forge sessions, so production refuses to start without one.
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("BETTER_AUTH_SECRET is not set. Generate one with `openssl rand -hex 32`.");
+  }
+  return "sayclear-development-only-secret-not-for-production";
+}
+
 function create() {
   return betterAuth({
-    appName: "Uttala",
+    appName: "SayClear",
     baseURL: resolveBaseUrl(),
-    secret: process.env.BETTER_AUTH_SECRET || "uttala-default-production-secret-key-32chars",
+    secret: resolveSecret(),
     trustedOrigins: [
       "https://*.vercel.app",
+      "http://localhost:3000",
       ...(process.env.BETTER_AUTH_URL ? [process.env.BETTER_AUTH_URL] : []),
+      ...(process.env.NEXT_PUBLIC_SITE_URL ? [process.env.NEXT_PUBLIC_SITE_URL] : []),
       ...(process.env.VERCEL_URL ? [`https://${process.env.VERCEL_URL}`] : []),
       ...(process.env.VERCEL_PROJECT_PRODUCTION_URL ? [`https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`] : []),
     ],
@@ -40,9 +52,9 @@ function create() {
       sendResetPassword: async ({ user, url }) => {
         await sendEmail({
           to: user.email,
-          subject: "Reset your Uttala password",
+          subject: "Reset your SayClear password",
           lines: [
-            "Someone asked to reset the password for your Uttala account.",
+            "Someone asked to reset the password for your SayClear account.",
             "If that was you, choose a new password with the button below. The link works for one hour. If it was not you, you can ignore this email.",
           ],
           action: { label: "Choose a new password", url },
@@ -54,9 +66,16 @@ function create() {
           google: {
             clientId: process.env.GOOGLE_CLIENT_ID as string,
             clientSecret: process.env.GOOGLE_CLIENT_SECRET as string,
+            prompt: "select_account",
           },
         }
       : {},
+    account: {
+      accountLinking: {
+        enabled: true,
+        trustedProviders: ["google"],
+      },
+    },
     user: {
       deleteUser: {
         enabled: true,

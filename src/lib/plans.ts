@@ -100,10 +100,10 @@ export const PLANS: Record<PlanId, Plan> = {
 export const PAID_PLANS: Exclude<PlanId, "free">[] = ["plus", "pro"];
 
 /** Stripe price lookup key for a plan and billing interval. */
-export const lookupKey = (plan: PlanId, interval: Interval) => `uttala_${plan}_${interval}ly`;
+export const lookupKey = (plan: PlanId, interval: Interval) => `sayclear_${plan}_${interval}ly`;
 
 export function parseLookupKey(key: string | null | undefined): { plan: PlanId; interval: Interval } | null {
-  const m = /^uttala_(plus|pro)_(month|year)ly$/.exec(key ?? "");
+  const m = /^(?:sayclear|uttala)_(plus|pro)_(month|year)ly$/.exec(key ?? "");
   return m ? { plan: m[1] as PlanId, interval: m[2] as Interval } : null;
 }
 

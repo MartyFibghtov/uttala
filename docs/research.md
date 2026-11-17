@@ -1,6 +1,6 @@
 # Research: how pronunciation works and how software can coach it
 
-This is the reasoning behind Uttala's design. Sources are listed at the end.
+This is the reasoning behind SayClear's design. Sources are listed at the end.
 
 ## 1. What pronunciation is
 
@@ -53,16 +53,16 @@ Known limits: scores at the single-phoneme level are noisy (one vendor benchmark
 | **SpeechAce and similar** | Phoneme scores | Fewer languages; paid per call |
 | **Self-hosted wav2vec 2.0 / ZIPA phoneme models** | Language-universal IPA recognition and GOP, full control | Needs a GPU service, G2P per language and calibration data |
 
-**Conclusion.** ElevenLabs covers the reference voice, the intelligibility test, timing and prosody for essentially any language, but it does not score individual sounds. Sound-level scoring needs a phoneme-aware engine. Uttala therefore uses ElevenLabs as the universal base layer and treats phoneme scoring as a pluggable second layer (Azure today, a self-hosted model later).
+**Conclusion.** ElevenLabs covers the reference voice, the intelligibility test, timing and prosody for essentially any language, but it does not score individual sounds. Sound-level scoring needs a phoneme-aware engine. SayClear therefore uses ElevenLabs as the universal base layer and treats phoneme scoring as a pluggable second layer (Azure today, a self-hosted model later).
 
-## 5. How Uttala applies this
+## 5. How SayClear applies this
 
 | Research finding | Product decision |
 | --- | --- |
 | Intelligibility is the goal | "Understood" score: share of words an unscripted recogniser got right |
 | Known text enables alignment | Learner reads a set text; forced alignment times every word |
 | GOP-style evidence | Word score blends recogniser confidence and alignment fit; Azure phoneme scores replace it where available |
-| Prosody matters as much as sounds | Pitch is tracked in the browser, normalised to each speaker's median, and compared with the reference word by word; rhythm compares each word's share of speaking time |
+| Sounds drive perceived accent most; prosody also counts | Sounds and words carry 75% of the overall score. Pitch is tracked in the browser, normalised to each speaker's median, and compared with the reference word by word; rhythm compares each word's share of speaking time |
 | Feedback must be specific | Click any word to see what was heard instead, its sounds, and to replay just that slice of yourself and of the reference |
 | Practise what is weakest | Words under 80 go to a drill list and leave after three clear repetitions in a row |
 | Perception before production; HVPT | Listening drill: minimal pairs played in a different voice each round |
@@ -70,12 +70,39 @@ Known limits: scores at the single-phoneme level are noisy (one vendor benchmark
 
 ## 6. Open items
 
-- **Calibration.** The mapping from alignment loss and recogniser confidence to a 0–100 score is a first guess. It needs tuning against recordings rated by people, per language.
-- **Phoneme diagnosis for all languages.** Add a self-hosted IPA recogniser so that sound-level feedback is not limited to Azure's locales, and so the app can say which sound was substituted.
+- **Human ratings per language.** The scale is anchored on native news speech and, for English, on expert ratings (section 7). German, Spanish, Russian and Swedish still need native listeners rating learner clips to confirm where 90 sits.
+- **More learner audio.** Exam videos often feature the teacher rather than a candidate; the learner side of the test set is small and weakly labelled.
 - **Articulation guidance.** Per-phoneme instructions and mouth diagrams, selected by the learner's first language.
 - **Tone languages.** Per-syllable tone contour comparison for Mandarin, Cantonese, Vietnamese and Thai.
 - **Scheduling.** Spaced repetition over the drill list instead of a simple three-in-a-row rule.
 - **Accounts.** Progress currently lives in the browser only.
+
+## 7. Validation on real speech (November 2026)
+
+No human raters were involved. Two sources, built with `npm run realset` and `npm run phonecheck` (audio kept locally under `.data/`, never committed):
+
+- **YouTube.** Native news broadcasts per language (BBC, PBS, tagesschau, heute journal, RTVE, Antena 3, Первый канал, SVT) and learners in speaking-exam videos (IELTS, telc, Goethe, DELE, ТРКИ, SFI). Each video is cut to three minutes, transcribed with speaker labels, and split into sentences by the dominant speaker. Labels are weak: several "exam" videos turned out to be teachers, and those were excluded after checking.
+- **speechocean762** (Apache-2.0). 96 English sentences by Mandarin speakers, stratified over expert accuracy ratings 3–10, with word ratings by five experts.
+
+**Findings**
+
+| Check | Result |
+| --- | --- |
+| Azure accuracy vs expert sentence ratings (n=96) | Pearson 0.71, Spearman 0.81 |
+| Azure 75% + on-device sound match 25% | Pearson 0.78, Spearman 0.81 (GOPT reports 0.74 on the same corpus) |
+| Words the experts marked wrong | Azure catches 70% with 8% false flags |
+| Native news vs IELTS learners, raw Azure | 99 vs 96: barely separated |
+| Native news vs IELTS learners, sound match | 96 vs 72.5; no learner sentence above 88, no native below 84 |
+| Words flagged by the sound check | 1% of native news words, 21% of learner words (English) |
+| German, sound match | Natives 78–88 per video, exam candidates 55–72 |
+| Russian | Learners 64.5 and 84.5 on Azure (34.5 and 61.5 sound match) vs natives 87–98 |
+| Swedish | Not separated: natives and SFI learners overlap on both signals. Provisional. |
+
+**Decisions taken from it**
+
+- Raw Azure scores are generous (correct but accented words land at 94–97). Scores are re-anchored per language on the native news distribution (`NATIVE_P10` in `src/lib/levels.ts`), so the slowest tenth of native words reads 92 and 90+ means within the range natives reach. Experts' 9–10 sentences now score 90+, their 7 and below mostly do not.
+- Outside en-US, Azure copies the word score onto every sound; those numbers are no longer shown.
+- The multilingual phone recogniser (wav2vec2 trained on espeak IPA, Apache-2.0) compares the learner with the native reference voice on the learner's device. Natives match the reference less closely in some languages (regional variety, style), so the match is read against each language's native level (`NATIVE_MATCH` in `src/lib/sound-check.ts`).
 
 ## Sources
 
@@ -92,3 +119,5 @@ Known limits: scores at the single-phoneme level are noisy (one vendor benchmark
 - [Wav2Vec2Phoneme, Hugging Face docs](https://huggingface.co/transformers/model_doc/wav2vec2_phoneme)
 - [Ease and Difficulty in L2 Pronunciation Teaching: A Mini-Review (Frontiers)](https://www.frontiersin.org/articles/10.3389/fcomm.2020.626985/full)
 - Witt & Young (2000), *Phone-level pronunciation scoring and assessment for interactive language learning*; Flege (1995), Speech Learning Model; Munro & Derwing (2006) on functional load; Lee, Jang & Plonsky (2015) and Saito (2012) meta-analyses; Thomson (2018) HVPT review; Hardison (2004). These are cited from background knowledge and were not re-read for this document.
+
+Proposals, open decisions and the launch path are collected in [ideas.md](ideas.md).

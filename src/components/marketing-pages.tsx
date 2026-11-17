@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -17,6 +18,7 @@ import {
   Users,
 } from "lucide-react";
 import type { ReactNode } from "react";
+import { ARTWORKS, ArtworkFrame } from "@/components/artwork";
 import { Orb } from "@/components/orb";
 import { Button } from "@/components/ui/button";
 import { LANGUAGES, unitsFor, type Language } from "@/lib/languages";
@@ -43,8 +45,18 @@ export const CONTENT = {
 
 function Hero({ eyebrow, title, children }: { eyebrow: string; title: string; children: ReactNode }) {
   return (
-    <section className="aurora-wash border-b">
-      <div className="mx-auto max-w-4xl px-4 py-14 md:px-8 md:py-20">
+    <section className="aurora-wash relative overflow-hidden border-b">
+      <div aria-hidden className="hero-artwork-mask pointer-events-none absolute inset-0">
+        <Image
+          src={ARTWORKS.heroAcoustic.src}
+          alt=""
+          fill
+          sizes="100vw"
+          loading="eager"
+          className="object-cover object-right opacity-45 dark:opacity-20 dark:brightness-90"
+        />
+      </div>
+      <div className="relative mx-auto max-w-4xl px-4 py-14 md:px-8 md:py-20">
         <p className="text-sm font-medium text-muted-foreground">{eyebrow}</p>
         <h1 className="mt-2 text-4xl font-semibold tracking-tight md:text-5xl">{title}</h1>
         <div className="mt-4 max-w-2xl text-lg text-muted-foreground">{children}</div>
@@ -100,7 +112,7 @@ const FEATURE_GROUPS: {
         icon: AudioLines,
         title: "Rhythm and melody",
         body: "Your pitch line drawn over a native speaker's, word by word, plus scores for fluency, rhythm and intonation.",
-        points: ["Pitch tracked in your browser", "Hesitations and pace against the reference", "Extra weight at the advanced level"],
+        points: ["Pitch tracked in your browser", "Hesitations and pace against the reference", "One scale at every level"],
         tier: "Plus",
       },
       {
@@ -141,7 +153,7 @@ const FEATURE_GROUPS: {
         icon: Mic,
         title: "Your own texts",
         body: "Paste the presentation, interview answers or lines you actually need, and save them to your library.",
-        points: ["Up to 600 characters per text", "The same feedback as built-in texts", "Saved to your account"],
+        points: ["Long texts split into short sentences, one at a time", "The same feedback as built-in sentences", "Saved to your account"],
         tier: "Plus",
       },
     ],
@@ -240,7 +252,7 @@ export function FeaturesPage() {
     <>
       <Hero eyebrow="Features" title="Everything between “I think that was right” and knowing">
         <p>
-          Uttala listens the way a careful teacher would, then gives you a plan: a course to follow, drills built from
+          {SITE.name} listens the way a careful teacher would, then gives you a plan: a course to follow, drills built from
           your own mistakes, and a schedule that keeps what you fix.
         </p>
       </Hero>
@@ -474,7 +486,7 @@ export function LanguagePage({ language }: { language: Language }) {
 const PRINCIPLES = [
   {
     title: "Being understood comes first",
-    body: "Accent and intelligibility are only partly related. Research on second-language speech consistently finds that learners can be easy to understand while keeping a clear accent, so Uttala's headline measure is how much of what you said a listener would recognise.",
+    body: "Accent and intelligibility are only partly related. Research on second-language speech consistently finds that learners can be easy to understand while keeping a clear accent, so SayClear's headline measure is how much of what you said a listener would recognise.",
     source: "Munro & Derwing; Levis, the intelligibility principle",
   },
   {
@@ -515,7 +527,7 @@ const PIPELINE = [
 export function MethodPage() {
   return (
     <>
-      <Hero eyebrow="Method" title="How Uttala listens, and why it teaches this way">
+      <Hero eyebrow="Method" title={`How ${SITE.name} listens, and why it teaches this way`}>
         <p>
           The product is built on what pronunciation research has found to work, and on a scoring pipeline we would
           rather explain than mystify.
@@ -537,24 +549,31 @@ export function MethodPage() {
       </section>
 
       <section className="border-y bg-secondary/40">
-        <div className="mx-auto max-w-4xl px-4 py-14 md:px-8">
-          <h2 className="text-3xl font-semibold tracking-tight">What happens to a recording</h2>
-          <ol className="mt-8 space-y-5">
-            {PIPELINE.map(([title, body], i) => (
-              <li key={title} className="flex gap-4">
-                <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-foreground text-sm font-medium text-background">
-                  {i + 1}
-                </span>
-                <div>
-                  <h3 className="font-semibold">{title}</h3>
-                  <p className="mt-1 text-sm text-muted-foreground">{body}</p>
-                </div>
-              </li>
-            ))}
-          </ol>
-          <p className="mt-8 text-sm text-muted-foreground">
-            The recording itself is discarded once it has been analysed. Only the scores are kept.
-          </p>
+        <div className="mx-auto grid max-w-6xl gap-10 px-4 py-14 md:px-8 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-center">
+          <div>
+            <h2 className="text-3xl font-semibold tracking-tight">What happens to a recording</h2>
+            <ol className="mt-8 space-y-5">
+              {PIPELINE.map(([title, body], i) => (
+                <li key={title} className="flex gap-4">
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-foreground text-sm font-medium text-background">
+                    {i + 1}
+                  </span>
+                  <div>
+                    <h3 className="font-semibold">{title}</h3>
+                    <p className="mt-1 text-sm text-muted-foreground">{body}</p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+            <p className="mt-8 text-sm text-muted-foreground">
+              The recording itself is discarded once it has been analysed. Only the scores are kept.
+            </p>
+          </div>
+          <ArtworkFrame
+            name="shadowingStudio"
+            sizes="(max-width: 1024px) 100vw, 380px"
+            className="aspect-[16/10] rounded-2xl shadow-sm"
+          />
         </div>
       </section>
 
@@ -563,7 +582,9 @@ export function MethodPage() {
         <ul className="mt-6 space-y-4 text-sm">
           {[
             ["Single-sound scores are noisy.", "Even the best published systems agree only moderately with human raters at the level of one sound. Trust the pattern across several recordings more than any single number."],
-            ["Recognisers are forgiving.", "Modern speech recognition is trained to understand accented speech, so it lets some real errors through. Strict scoring at the advanced level compensates in part."],
+            ["Recognisers are forgiving.", "Modern speech recognition is trained to understand accented speech, so it lets some real errors through."],
+            ["Sound-by-sound checks depend on the language and your settings.", "English is scored sound by sound on our servers. In every language, the optional precise sound check compares each sound with a native reading on your own device. Without it, other languages are scored word by word. Every result says which check it used, and the app never shows a per-sound number it did not measure."],
+            ["Melody and rhythm are a guide.", "They are compared with one reference voice, so they count for little in your overall score. Your sounds and words carry three quarters of it."],
             ["Conditions matter.", "A noisy room, a distant microphone or a very short recording all lower accuracy. The app tells you when it could not measure something."],
             ["No tool can promise a native accent.", "What it can do is show you precisely what is still different, and make the practice efficient."],
           ].map(([title, body]) => (
@@ -593,10 +614,11 @@ export const HELP: { title: string; items: { q: string; a: string }[] }[] = [
   {
     title: "Scores and feedback",
     items: [
-      { q: "What do the colours mean?", a: "Plain words came through clearly. Amber words were unclear, red ones were mispronounced or heard as something else, and struck-through words were not heard at all. The thresholds are stricter at higher levels." },
+      { q: "What do the colours mean?", a: "Plain words came through clearly. Amber words were unclear, red ones were mispronounced or heard as something else, and struck-through words were not heard at all. The thresholds are the same at every level." },
       { q: "Why did a word I said correctly get a low score?", a: "Usually background noise, a clipped start or end of the recording, or a very quiet voice. Record again closer to the microphone. If a word keeps scoring low, compare your slice of audio with the reference: the difference is often audible once isolated." },
       { q: "What is the “Understood” score?", a: "The share of words that a recogniser which never saw your text wrote down correctly. It is the closest measure to what a real listener experiences." },
-      { q: "Why is my score lower at the advanced level?", a: "Advanced scoring uses stricter thresholds and gives rhythm and melody more weight. Use the checkpoint test for a number that is comparable across levels." },
+      { q: "Can it tell whether I sound native?", a: "Partly, and we say exactly how far. Each word is compared with native speech. English is also checked sound by sound, and with the precise sound check turned on, so is every other language. A 90 means every word we checked matched a native speaker. Voice placement and the finest vowel colouring are not measured yet, so a listener may still hear a trace of accent. Melody and rhythm are compared with one reference voice, so treat them as a guide. Your trend over many recordings is more reliable than any single take." },
+      { q: "Does my level change my score?", a: "No. Your level picks the texts and the playback speed. Every recording is scored on the same scale, so your numbers are comparable across levels and over time. 90 to 100 means every word we checked matched a native speaker." },
     ],
   },
   {

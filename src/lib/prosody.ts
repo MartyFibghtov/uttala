@@ -1,7 +1,7 @@
 import { pitchAt, type PitchTrack } from "./audio";
-import { LEVELS, type LevelId } from "./levels";
+import { SCORE_SCALE } from "./levels";
 import type { Span } from "./text";
-import type { ContourPoint, ProsodyResult, WordResult } from "./types";
+import type { AssessResult, ContourPoint, ProsodyResult, WordResult } from "./types";
 
 const POINTS_PER_WORD = 4;
 const clamp = (v: number) => Math.max(0, Math.min(100, Math.round(v)));
@@ -47,7 +47,7 @@ export function compareProsody(
       (s, p) => s + Math.abs(Math.log((p.u.end - p.u.start) / uTotal / ((p.r.end - p.r.start) / rTotal))),
       0,
     ) / both.length;
-  const rhythm = clamp(100 * Math.exp(-drift));
+  const rhythm = clamp(100 * Math.exp(-drift * 1.5));
 
   // Fluency: pace and pauses that the reference does not make.
   const pace = rTotal / uTotal;
@@ -62,12 +62,16 @@ export function compareProsody(
   const rushed = pace > 1.35 ? (pace - 1.35) * 80 : 0;
   const fluency = clamp(100 - (hesitations / both.length) * 250 - slow - rushed);
 
-  // Intonation: correlation of the two pitch contours sampled inside each word.
+  // Intonation: word-level + sample-level pitch contour correlation combined with natural pitch dynamic range.
   const contour: ContourPoint[] = [];
   const us: number[] = [];
   const rs: number[] = [];
+  const wordU: number[] = [];
+  const wordR: number[] = [];
   if (userPitch && refPitch) {
     for (const p of both) {
+      const pu: number[] = [];
+      const pr: number[] = [];
       for (let k = 0; k < POINTS_PER_WORD; k++) {
         const frac = (k + 0.5) / POINTS_PER_WORD;
         const u = pitchAt(userPitch, p.u.start + frac * (p.u.end - p.u.start));
@@ -76,11 +80,34 @@ export function compareProsody(
         if (u !== null && r !== null) {
           us.push(u);
           rs.push(r);
+          pu.push(u);
+          pr.push(r);
         }
+      }
+      if (pu.length > 0) {
+        wordU.push(pu.reduce((s, v) => s + v, 0) / pu.length);
+        wordR.push(pr.reduce((s, v) => s + v, 0) / pr.length);
       }
     }
   }
-  const intonation = us.length >= 8 ? clamp(100 * Math.max(0, pearson(us, rs))) : null;
+  let intonation: number | null = null;
+  if (us.length >= 8) {
+    const rawCorr = pearson(us, rs);
+    const wordCorr = wordU.length >= 4 ? pearson(wordU, wordR) : rawCorr;
+    const corr = wordCorr * 0.6 + rawCorr * 0.4;
+    const shapeScore = 100 * Math.pow(Math.max(0, (corr + 0.35) / 1.35), 0.75);
+
+    const std = (xs: number[]) => {
+      const m = xs.reduce((s, v) => s + v, 0) / xs.length;
+      return Math.sqrt(xs.reduce((s, v) => s + (v - m) ** 2, 0) / xs.length);
+    };
+    const uStd = std(us);
+    const rStd = std(rs);
+    const rangeRatio = Math.min(uStd, rStd) / Math.max(uStd, rStd, 0.5);
+    const rangeScore = 100 * Math.pow(rangeRatio, 0.7);
+
+    intonation = clamp(shapeScore * 0.45 + rangeScore * 0.55);
+  }
 
   return { fluency, rhythm, intonation, pace, hesitations, contour };
 }
@@ -158,10 +185,10 @@ export function fallbackProsody(
 
   const base = compareProsody(userSpans, refSpans, null, null);
   const avgWordScore = words.reduce((s, w) => s + w.score, 0) / words.length;
-  const corr = us.length >= 8 ? Math.max(0.45, pearson(us, rs)) : 0.78;
-  const intonation = clamp(Math.round(corr * 65 + avgWordScore * 0.32));
-  const rhythm = base.rhythm ?? clamp(Math.round(avgWordScore * 0.92));
-  const fluency = base.fluency ?? clamp(Math.round(avgWordScore * 0.95));
+  const corr = us.length >= 8 ? Math.max(0, pearson(us, rs)) : 0.55;
+  const intonation = clamp(Math.round(corr * 55 + avgWordScore * 0.35));
+  const rhythm = base.rhythm ?? clamp(Math.round(avgWordScore * 0.85));
+  const fluency = base.fluency ?? clamp(Math.round(avgWordScore * 0.85));
 
   return {
     fluency,
@@ -173,7 +200,7 @@ export function fallbackProsody(
   };
 }
 
-/** Weighted overall score over whichever dimensions are available; the weights depend on the learner's level. */
+/** Weighted overall score over whichever dimensions are available. The same weights apply at every level. */
 export function overallScore(
   parts: {
     accuracy: number;
@@ -182,9 +209,8 @@ export function overallScore(
     rhythm: number | null;
     intonation: number | null;
   },
-  level: LevelId,
 ): number {
-  const weights = LEVELS[level].weights;
+  const weights = SCORE_SCALE.weights;
   let sum = 0;
   let weight = 0;
   for (const key of Object.keys(weights) as (keyof typeof weights)[]) {
@@ -194,4 +220,16 @@ export function overallScore(
     weight += weights[key];
   }
   return Math.round(sum / weight);
+}
+
+/** A recording's overall score: the deduction score when the sound model ran, otherwise the weighted mix. */
+export function overallFor(result: AssessResult, prosody: ProsodyResult | null): number {
+  if (result.deduction) return result.deduction.score;
+  return overallScore({
+    accuracy: result.scores.accuracy,
+    intelligibility: result.scores.intelligibility,
+    fluency: prosody?.fluency ?? null,
+    rhythm: prosody?.rhythm ?? null,
+    intonation: prosody?.intonation ?? null,
+  });
 }

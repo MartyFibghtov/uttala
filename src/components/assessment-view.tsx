@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { ArrowLeft, ArrowRight, Clock, Ear, Mic, Music, RotateCcw, Sparkles, Timer } from "lucide-react";
 import { PageHeader } from "@/components/app-shell";
+import { ArtworkFrame } from "@/components/artwork";
 import {
   buildSimulatedTake,
   DiagnosticStageRecorder,
@@ -229,11 +230,16 @@ export function AssessmentView() {
             </CardContent>
           </Card>
 
-          <Card className="h-fit">
+          <Card className="h-fit overflow-hidden">
             <CardHeader>
               <CardTitle className="text-base">{last ? "Current speech rank" : "What you will get"}</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="space-y-4">
+              <ArtworkFrame
+                name="stepFix"
+                sizes="(max-width: 1024px) 100vw, 340px"
+                className="aspect-[4/3] w-full rounded-xl"
+              />
               {last && lastRank ? (
                 <div>
                   <div className="flex items-baseline justify-between">

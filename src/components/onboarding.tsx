@@ -278,7 +278,7 @@ export function Onboarding() {
     ],
     "test-melody": [
       "Part 3 of 3 · Melody & intonation",
-      "Let your pitch rise naturally on the first question and fall cleanly at the end of the sentence.",
+      "Let your pitch rise naturally on the opening clause and settle cleanly at the end of the sentence.",
     ],
     ranking: [
       "Your pronunciation ranking",

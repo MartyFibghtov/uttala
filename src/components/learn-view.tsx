@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { ArrowLeft, ArrowRight, AudioWaveform, Check, Ear, Gauge, Mic, PartyPopper } from "lucide-react";
 import { PageHeader } from "@/components/app-shell";
+import { ArtworkFrame } from "@/components/artwork";
 import { Stars } from "@/components/charts";
 import { Orb, type OrbPalette } from "@/components/orb";
 import { LanguagePicker, VoicePicker, useVoiceId } from "@/components/pickers";
@@ -23,8 +24,8 @@ const MORE = [
   {
     href: "/practice",
     icon: Mic,
-    title: "Passages and tongue twisters",
-    body: "Longer texts for rhythm and melody, or paste the words you actually need to say.",
+    title: "Short sentences and tongue twisters",
+    body: "Drill the hard words on their own, then say the whole sentence. Or paste what you actually need to say.",
   },
   {
     href: "/sounds",
@@ -65,8 +66,8 @@ export function LearnView() {
         <LanguagePicker />
       </PageHeader>
 
-      <Card className="aurora-wash">
-        <CardContent className="flex flex-col gap-5 sm:flex-row sm:items-center">
+      <Card className="aurora-wash overflow-hidden">
+        <CardContent className="flex flex-col gap-6 md:flex-row md:items-center">
           <div className="min-w-0 flex-1">
             <p className="text-sm text-muted-foreground">Course progress</p>
             <p className="mt-1 text-3xl font-semibold tracking-tight tabular-nums">
@@ -74,16 +75,23 @@ export function LearnView() {
               <span className="text-lg font-normal text-muted-foreground"> / {total} phrases</span>
             </p>
             <Progress value={(cleared / total) * 100} className="mt-3 h-2" aria-label="Course progress" />
-            <p className="mt-2 text-xs text-muted-foreground tabular-nums">
-              {stars} of {total * 3} stars collected
-            </p>
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+              <p className="text-xs text-muted-foreground tabular-nums">
+                {stars} of {total * 3} stars collected
+              </p>
+              <Button asChild size="lg" className="rounded-full">
+                <Link href={`/learn/${(next ?? course[0]).unit.id}`}>
+                  {cleared === 0 ? "Start the course" : next ? `Continue: ${next.unit.title}` : "Review from the start"}
+                  <ArrowRight />
+                </Link>
+              </Button>
+            </div>
           </div>
-          <Button asChild size="lg" className="rounded-full">
-            <Link href={`/learn/${(next ?? course[0]).unit.id}`}>
-              {cleared === 0 ? "Start the course" : next ? `Continue: ${next.unit.title}` : "Review from the start"}
-              <ArrowRight />
-            </Link>
-          </Button>
+          <ArtworkFrame
+            name="learnBanner"
+            sizes="(max-width: 768px) 100vw, 260px"
+            className="aspect-video w-full shrink-0 rounded-xl md:w-64"
+          />
         </CardContent>
       </Card>
 

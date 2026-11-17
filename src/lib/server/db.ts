@@ -1,17 +1,22 @@
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { createClient, type Client, type InValue } from "@libsql/client";
 
 let client: Client | undefined;
 
 /**
  * libSQL client. Uses a local SQLite file in development and a hosted
- * database (e.g. Turso) when DATABASE_URL is set.
+ * database (e.g. Turso) when DATABASE_URL or TURSO_DATABASE_URL is set.
  */
 export function dbConfig() {
-  const defaultFile = process.env.VERCEL ? "file:/tmp/uttala.db" : "file:.data/uttala.db";
-  const url = process.env.DATABASE_URL?.trim() || defaultFile;
+  const defaultFile = process.env.VERCEL
+    ? "file:/tmp/sayclear.db"
+    : existsSync(".data/uttala.db") && !existsSync(".data/sayclear.db")
+      ? "file:.data/uttala.db"
+      : "file:.data/sayclear.db";
+  const url = process.env.DATABASE_URL?.trim() || process.env.TURSO_DATABASE_URL?.trim() || defaultFile;
   if (url.startsWith("file:.data/")) mkdirSync(".data", { recursive: true });
-  return { url, authToken: process.env.DATABASE_AUTH_TOKEN };
+  const authToken = process.env.DATABASE_AUTH_TOKEN?.trim() || process.env.TURSO_AUTH_TOKEN?.trim();
+  return { url, authToken };
 }
 
 export function db(): Client {

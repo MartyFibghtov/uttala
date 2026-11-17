@@ -24,9 +24,10 @@ import { Progress } from "@/components/ui/progress";
 import { useAccount } from "@/hooks/use-account";
 import { ACHIEVEMENTS, isUnlocked } from "@/lib/gamification";
 import { getLanguage } from "@/lib/languages";
+import { bandFor } from "@/lib/score-bands";
 import { useOverview } from "@/lib/stats";
 import { clearProgress, isDue, useStore } from "@/lib/store";
-import type { Attempt } from "@/lib/types";
+import type { Attempt, WeakPhoneme, WeakWord } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 function Trend({ attempts }: { attempts: Attempt[] }) {
@@ -102,6 +103,81 @@ const RANGES = [
   { id: 300, label: "All" },
 ];
 
+const median = (xs: number[]) => {
+  if (!xs.length) return null;
+  const s = [...xs].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return Math.round(s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2);
+};
+
+/**
+ * Accent check over the last ten recordings. One take can be thrown off by the microphone, the room or
+ * the analysis itself; the median over ten is the number worth trusting, so the verdict waits for it.
+ */
+function AccentCheck({ attempts, phonemes, weak }: { attempts: Attempt[]; phonemes: WeakPhoneme[]; weak: WeakWord[] }) {
+  const NEEDED = 10;
+  const last = attempts.filter((a) => !a.demo).slice(0, NEEDED);
+  const sounds = median(last.map((a) => a.accuracy));
+  const nativeLike = last.filter((a) => a.accuracy >= 90).length;
+  const consistent = last.length >= NEEDED && nativeLike >= 8 && (sounds ?? 0) >= 92;
+  const troubleSounds = phonemes
+    .filter((p) => p.count >= 3 && p.avg < 85)
+    .sort((a, b) => a.avg - b.avg)
+    .slice(0, 3);
+  const troubleWords = [...weak].sort((a, b) => a.avg - b.avg).slice(0, 3);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Accent check</CardTitle>
+        <p className="text-sm text-muted-foreground">
+          Your sounds and words over the last {NEEDED} recordings. A single take can mislead; this is the number to trust.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {last.length < 5 || sounds === null ? (
+          <p className="text-sm text-muted-foreground">
+            Record {5 - last.length} more time{5 - last.length === 1 ? "" : "s"} for a first reading.
+          </p>
+        ) : (
+          <div className="flex items-baseline gap-3">
+            <span className={cn("text-4xl font-semibold tabular-nums", scoreColor(sounds))}>{sounds}</span>
+            <div>
+              <p className="font-medium">{consistent ? "Consistently native-like" : bandFor(sounds).label}</p>
+              <p className="text-xs text-muted-foreground">
+                {nativeLike} of the last {last.length} recordings scored 90 or more
+                {last.length < NEEDED ? ` · ${NEEDED - last.length} more for a full reading` : ""}
+              </p>
+            </div>
+          </div>
+        )}
+        {(troubleSounds.length > 0 || troubleWords.length > 0) && (
+          <div className="space-y-1.5 text-sm">
+            <p className="text-xs font-medium text-muted-foreground">What still gives you away</p>
+            {troubleSounds.map((p) => (
+              <p key={p.key}>
+                <span className="font-mono">/{p.ipa}/</span>{" "}
+                <span className="text-muted-foreground">
+                  averages {p.avg} over {p.count} uses{p.examples.length ? `, e.g. ${p.examples.slice(0, 2).join(", ")}` : ""}
+                </span>
+              </p>
+            ))}
+            {troubleWords.map((w) => (
+              <p key={w.key}>
+                {w.text}{" "}
+                <span className="text-muted-foreground">
+                  averages {w.avg}
+                  {w.heard ? `, heard as “${w.heard}”` : ""}
+                </span>
+              </p>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export function ProgressView() {
   const { me } = useAccount();
   const lang = me.profile.lang;
@@ -111,6 +187,7 @@ export function ProgressView() {
   const weak = useStore("weak").filter((w) => w.lang === lang);
   const mastered = useStore("mastered").filter((w) => w.lang === lang);
   const checkpoints = useStore("checkpoints").filter((c) => c.lang === lang);
+  const weakSounds = useStore("phonemes").filter((p) => p.lang === lang);
   const [range, setRange] = useState(30);
   const [shown, setShown] = useState(15);
 
@@ -210,6 +287,7 @@ export function ProgressView() {
             </div>
           ) : (
             <>
+              <AccentCheck attempts={attempts} phonemes={weakSounds} weak={weak} />
               <Card>
                 <CardHeader className="flex flex-row items-start justify-between gap-4">
                   <div>

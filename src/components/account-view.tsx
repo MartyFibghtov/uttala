@@ -5,8 +5,10 @@ import { useEffect, useRef, useState } from "react";
 import { CreditCard, Download, Loader2, LogOut, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/app-shell";
+import { GoogleMark } from "@/components/auth-form";
 import { LanguagePicker, LevelPicker } from "@/components/pickers";
 import { openBillingPortal, Pricing } from "@/components/pricing";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -26,6 +28,8 @@ import { authClient } from "@/lib/auth-client";
 import { LEVELS } from "@/lib/levels";
 import { PLANS } from "@/lib/plans";
 import { ReminderToggle } from "@/components/community-view";
+import { onModelProgress, preloadRatingModel } from "@/lib/rating";
+import { SOUND_CHECK_DOWNLOAD_MB } from "@/lib/sound-check";
 import { ThemePicker } from "@/components/theme";
 import { GOALS } from "@/lib/gamification";
 import { clearProgress, exportProgress, setSettings, useStore } from "@/lib/store";
@@ -49,17 +53,27 @@ function PlanStatus() {
   return <p className={sub.status === "past_due" ? "text-sm text-red-600" : "text-sm text-muted-foreground"}>{line}</p>;
 }
 
-function DeleteAccount() {
-  const [password, setPassword] = useState("");
+function DeleteAccount({ hasPassword }: { hasPassword: boolean }) {
+  const [confirmation, setConfirmation] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [needsFreshSession, setNeedsFreshSession] = useState(false);
+
+  const readyToDelete = hasPassword ? confirmation.length > 0 : confirmation.trim().toUpperCase() === "DELETE";
 
   const remove = async () => {
     setBusy(true);
     setError(null);
-    const { error } = await authClient.deleteUser({ password });
+    setNeedsFreshSession(false);
+    const { error } = await authClient.deleteUser(hasPassword ? { password: confirmation } : {});
     if (error) {
-      setError(error.message ?? "We could not delete the account. Check your password.");
+      const freshNeeded = !hasPassword && (error.code === "SESSION_EXPIRED" || /fresh|expired/i.test(error.message ?? ""));
+      setNeedsFreshSession(freshNeeded);
+      setError(
+        freshNeeded
+          ? "For your security, sign in with Google again before deleting your account."
+          : (error.message ?? (hasPassword ? "We could not delete the account. Check your password." : "We could not delete the account.")),
+      );
       setBusy(false);
       return;
     }
@@ -84,25 +98,40 @@ function DeleteAccount() {
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-1.5">
-          <Label htmlFor="delete-password">Confirm with your password</Label>
+          <Label htmlFor="delete-confirm">
+            {hasPassword ? "Confirm with your password" : "Type DELETE to confirm"}
+          </Label>
           <Input
-            id="delete-password"
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            id="delete-confirm"
+            type={hasPassword ? "password" : "text"}
+            autoComplete={hasPassword ? "current-password" : "off"}
+            placeholder={hasPassword ? undefined : "DELETE"}
+            value={confirmation}
+            onChange={(e) => setConfirmation(e.target.value)}
           />
           {error && (
             <p className="text-sm text-red-600" role="alert">
               {error}
             </p>
           )}
+          {needsFreshSession && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mt-1 rounded-full"
+              onClick={() => void authClient.signIn.social({ provider: "google", callbackURL: "/account" })}
+            >
+              <GoogleMark />
+              Re-authenticate with Google
+            </Button>
+          )}
         </div>
         <DialogFooter>
           <DialogClose asChild>
             <Button variant="outline">Keep my account</Button>
           </DialogClose>
-          <Button variant="destructive" onClick={remove} disabled={busy || !password}>
+          <Button variant="destructive" onClick={remove} disabled={busy || !readyToDelete}>
             {busy && <Loader2 className="animate-spin" />}
             Delete everything
           </Button>
@@ -143,13 +172,68 @@ const SHORTCUTS: [string, string][] = [
   ["L", "Listen to the reference"],
 ];
 
+function SoundCheckToggle() {
+  const [progress, setProgress] = useState<number | null>(null);
+  const [done, setDone] = useState(false);
+  const download = async () => {
+    setProgress(0);
+    try {
+      const off = onModelProgress((f) => setProgress(f));
+      await preloadRatingModel().finally(off);
+      setDone(true);
+      toast.success("The sound model is ready on this device.");
+    } catch {
+      toast.error("The sound model could not be downloaded. Check your connection and try again.");
+    } finally {
+      setProgress(null);
+    }
+  };
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-4">
+      <p className="max-w-xl text-sm text-muted-foreground">
+        Every recording is rated by deduction: it starts at 100 and each wrong sound, unclear word, extra pause or
+        off rhythm and melody costs points. The sounds are checked by a model that runs on this device: a one-time
+        download of about {SOUND_CHECK_DOWNLOAD_MB} MB, and your recordings stay here for this step. It downloads on
+        your first recording; you can fetch it now instead.
+      </p>
+      <Button variant="outline" className="rounded-full" onClick={download} disabled={progress !== null || done}>
+        {progress !== null ? `Downloading ${Math.round(progress * 100)}%` : done ? "Ready" : "Download now"}
+      </Button>
+    </div>
+  );
+}
+
 export function AccountView() {
   const { me, refresh } = useAccount();
   const params = useSearchParams();
   const router = useRouter();
   const [opening, setOpening] = useState(false);
+  const [linkingGoogle, setLinkingGoogle] = useState(false);
+  const [providers, setProviders] = useState<string[] | null>(null);
+  const [googleCapable, setGoogleCapable] = useState(false);
   const handled = useRef(false);
   const checkout = params.get("checkout");
+  const authError = params.get("error");
+
+  useEffect(() => {
+    let cancelled = false;
+    void authClient.listAccounts().then(({ data }) => {
+      if (!cancelled && data) setProviders(data.map((a) => a.providerId));
+    });
+    fetch("/api/plans")
+      .then((r) => r.json() as Promise<{ google?: boolean }>)
+      .then((c) => !cancelled && setGoogleCapable(!!c.google))
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!authError) return;
+    toast.error("Could not connect Google account. Make sure your Google account uses the same email or try again.");
+    router.replace("/account");
+  }, [authError, router]);
 
   // Back from Stripe: pull the new plan straight away instead of waiting for the webhook.
   useEffect(() => {
@@ -181,7 +265,7 @@ export function AccountView() {
     });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = "uttala-data.json";
+    a.download = "sayclear-data.json";
     a.click();
     URL.revokeObjectURL(a.href);
   };
@@ -189,6 +273,24 @@ export function AccountView() {
   const signOut = async () => {
     await authClient.signOut();
     window.location.assign("/");
+  };
+
+  const hasPassword = providers ? providers.includes("credential") : true;
+  const hasGoogle = providers ? providers.includes("google") : false;
+
+  const connectGoogle = async () => {
+    setLinkingGoogle(true);
+    try {
+      const { error } = await authClient.linkSocial({
+        provider: "google",
+        callbackURL: "/account",
+        errorCallbackURL: "/account",
+      });
+      if (error) throw new Error(error.message ?? "Could not start Google connection.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not connect Google.");
+      setLinkingGoogle(false);
+    }
   };
 
   return (
@@ -243,6 +345,15 @@ export function AccountView() {
 
         <Card>
           <CardHeader>
+            <CardTitle className="text-base">Rating and sound model</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <SoundCheckToggle />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
             <CardTitle className="text-base">Practice reminders</CardTitle>
           </CardHeader>
           <CardContent>
@@ -280,16 +391,42 @@ export function AccountView() {
               saved to your account.
             </p>
           </CardHeader>
-          <CardContent className="flex flex-wrap gap-2">
-            <Button variant="outline" className="rounded-full" onClick={download}>
-              <Download />
-              Download my data
-            </Button>
-            <Button variant="outline" className="rounded-full" onClick={signOut}>
-              <LogOut />
-              Sign out
-            </Button>
-            <DeleteAccount />
+          <CardContent className="space-y-4">
+            {providers && (
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="text-muted-foreground">Sign-in:</span>
+                {hasPassword && <Badge variant="secondary">Email &amp; password</Badge>}
+                {hasGoogle && (
+                  <Badge variant="secondary" className="gap-1.5">
+                    <GoogleMark />
+                    Google
+                  </Badge>
+                )}
+                {googleCapable && !hasGoogle && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 rounded-full text-xs"
+                    disabled={linkingGoogle}
+                    onClick={connectGoogle}
+                  >
+                    {linkingGoogle ? <Loader2 className="animate-spin" /> : <GoogleMark />}
+                    Connect Google
+                  </Button>
+                )}
+              </div>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" className="rounded-full" onClick={download}>
+                <Download />
+                Download my data
+              </Button>
+              <Button variant="outline" className="rounded-full" onClick={signOut}>
+                <LogOut />
+                Sign out
+              </Button>
+              <DeleteAccount hasPassword={hasPassword} />
+            </div>
           </CardContent>
         </Card>
       </div>

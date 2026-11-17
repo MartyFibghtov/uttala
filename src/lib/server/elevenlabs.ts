@@ -139,7 +139,13 @@ function langFromAccent(accent?: string | null): string | null {
   return null;
 }
 
-let voiceCache: { at: number; voices: Voice[]; verifiedByVoice: Map<string, Set<string>> } | null = null;
+interface VoiceMeta {
+  verified: Set<string>;
+  category: string;
+  supportsV4: boolean;
+}
+
+let voiceCache: { at: number; voices: Voice[]; metaByVoice: Map<string, VoiceMeta> } | null = null;
 
 export async function listVoices(): Promise<Voice[]> {
   if (voiceCache && Date.now() - voiceCache.at < 10 * 60_000) return voiceCache.voices;
@@ -152,14 +158,21 @@ export async function listVoices(): Promise<Voice[]> {
     voices: {
       voice_id: string;
       name: string;
+      category?: string | null;
+      high_quality_base_model_ids?: string[] | null;
       preview_url?: string | null;
       labels?: Record<string, string>;
       fine_tuning?: { language?: string | null } | null;
       verified_languages?: { language: string; locale?: string | null; accent?: string | null; preview_url?: string | null }[];
     }[];
   };
-  const verifiedByVoice = new Map<string, Set<string>>();
-  const voices: Voice[] = data.voices.map((v) => {
+  // Prefer studio/professional/premade voices and exclude personal instant clones when studio voices exist,
+  // since instant clones can carry poor recording quality or flat prosody.
+  const nonCloned = data.voices.filter((v) => v.category !== "cloned");
+  const sourceVoices = nonCloned.length > 0 ? nonCloned : data.voices;
+
+  const metaByVoice = new Map<string, VoiceMeta>();
+  const voices: Voice[] = sourceVoices.map((v) => {
     // Strictly determine the speaker's own native language. Never mark a voice as native
     // across all of its multilingual `verified_languages` entries, which carry a foreign accent.
     const nativeLang =
@@ -175,7 +188,12 @@ export async function listVoices(): Promise<Voice[]> {
       const code = normalizeLangCode(l.language) ?? normalizeLangCode(l.locale);
       if (code) verified.add(code);
     }
-    verifiedByVoice.set(v.voice_id, verified);
+    const hqModels = v.high_quality_base_model_ids ?? [];
+    metaByVoice.set(v.voice_id, {
+      verified,
+      category: v.category ?? "",
+      supportsV4: hqModels.some((m) => m.includes("eleven_v4")),
+    });
 
     return {
       id: v.voice_id,
@@ -188,40 +206,56 @@ export async function listVoices(): Promise<Voice[]> {
       previewUrl: v.preview_url ?? undefined,
     };
   });
-  voiceCache = { at: Date.now(), voices, verifiedByVoice };
+  voiceCache = { at: Date.now(), voices, metaByVoice };
   return voices;
 }
 
+function voiceQualityRank(meta: VoiceMeta | undefined, lang: string): number {
+  if (!meta) return 0;
+  let score = 0;
+  if (meta.category === "professional") score += 4;
+  else if (meta.category === "premade") score += 2;
+  if (meta.supportsV4) score += 2;
+  if (meta.verified.has(lang)) score += 1;
+  return score;
+}
+
 /**
- * The voice to use for reference speech: strictly native to `lang` whenever the
- * account has a native speaker for that language, with a clear teacher/everyday role.
+ * The voice to use for reference speech: native to `lang` when a studio voice is available,
+ * otherwise a verified multilingual studio voice, preferring clear teacher/everyday roles.
  */
 export async function pickVoice(lang: string, level: LevelId, voiceId?: string): Promise<string> {
   const voices = await listVoices();
   const native = voices.filter((v) => v.langs.includes(lang));
   if (voiceId && native.some((v) => v.id === voiceId)) return voiceId;
 
-  const verifiedSet = voiceCache?.verifiedByVoice;
+  const metaMap = voiceCache?.metaByVoice;
   const verifiedFallback =
     native.length > 0
       ? native
-      : voices.filter((v) => verifiedSet?.get(v.id)?.has(lang));
+      : voices.filter((v) => metaMap?.get(v.id)?.verified.has(lang));
   const pool = verifiedFallback.length ? verifiedFallback : voices;
+  const rankedPool = [...pool].sort(
+    (a, b) => voiceQualityRank(metaMap?.get(b.id), lang) - voiceQualityRank(metaMap?.get(a.id), lang),
+  );
   const wanted: VoiceRole[] = level === "beginner" ? ["teacher", "everyday"] : ["everyday", "teacher"];
-  const chosen = wanted.map((r) => pool.find((v) => v.role === r)).find(Boolean) ?? pool[0];
+  const chosen = wanted.map((r) => rankedPool.find((v) => v.role === r)).find(Boolean) ?? rankedPool[0];
   if (!chosen) throw new Error("No voices available on this ElevenLabs account.");
   return chosen.id;
 }
 
 const memory = new Map<string, TtsResponse>();
 
-export const ttsModel = () => process.env.ELEVENLABS_TTS_MODEL ?? "eleven_turbo_v2_5";
+export const ttsModel = () => process.env.ELEVENLABS_TTS_MODEL ?? "eleven_v4";
 
 const modelSupportsLanguageCode = (model: string) =>
-  model.includes("turbo_v2_5") || model.includes("flash_v2_5") || model.includes("v3");
+  model.includes("turbo_v2_5") ||
+  model.includes("flash_v2_5") ||
+  model.includes("v3") ||
+  model.includes("v4");
 
 const cacheKey = (voice: string, text: string, lang = "en") =>
-  createHash("sha256").update(`v3|${ttsModel()}|${lang}|${voice}|${text}`).digest("hex");
+  createHash("sha256").update(`v4|${ttsModel()}|${lang}|${voice}|${text}`).digest("hex");
 
 /** Look for an already generated reading: this server's memory first, then the database. */
 export async function cachedSpeech(voice: string, text: string, lang = "en"): Promise<TtsResponse | null> {
@@ -309,18 +343,30 @@ export async function synthesize(text: string, voice: string, persist: boolean, 
     payload.language_code = lang;
   }
 
+  const isV3 = model.includes("v3");
+  const supportsStyleAndBoost = model.includes("multilingual_v2");
+
   if (isolated) {
-    // High stability, zero style exaggeration, and native-language prosodic framing prevent
+    // High stability and native-language prosodic framing prevent
     // rising/hanging mid-sentence intonation or foreign-accent bleed on isolated drill words.
     payload.voice_settings = {
-      stability: 0.86,
+      stability: isV3 ? 1.0 : 0.85,
       similarity_boost: 0.82,
-      style: 0.0,
-      use_speaker_boost: true,
+      ...(supportsStyleAndBoost ? { style: 0.0, use_speaker_boost: true } : {}),
     };
-    const ctx = NATIVE_CITATION_CONTEXT[lang] ?? NATIVE_CITATION_CONTEXT.en;
-    payload.previous_text = ctx.prev;
-    payload.next_text = ctx.next;
+    if (!isV3) {
+      const ctx = NATIVE_CITATION_CONTEXT[lang] ?? NATIVE_CITATION_CONTEXT.en;
+      payload.previous_text = ctx.prev;
+      payload.next_text = ctx.next;
+    }
+  } else {
+    // Moderate stability gives sentences natural lexical stress, question pitch rises, and cadence
+    // instead of a flat monotone reading.
+    payload.voice_settings = {
+      stability: isV3 ? 0.5 : 0.45,
+      similarity_boost: 0.78,
+      ...(supportsStyleAndBoost ? { style: 0.15, use_speaker_boost: true } : {}),
+    };
   }
 
   const res = await fetch(
@@ -329,7 +375,7 @@ export async function synthesize(text: string, voice: string, persist: boolean, 
       method: "POST",
       headers: { "xi-api-key": key(), "content-type": "application/json" },
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(15_000),
     },
   );
   if (!res.ok) await fail(res, "text-to-speech");
@@ -388,7 +434,7 @@ export async function forcedAlign(audio: Blob, text: string): Promise<ForcedAlig
     method: "POST",
     headers: { "xi-api-key": key() },
     body: form,
-    signal: AbortSignal.timeout(7000),
+    signal: AbortSignal.timeout(10_000),
   });
   if (!res.ok) await fail(res, "forced alignment");
   const data = (await res.json()) as {
@@ -421,7 +467,7 @@ export async function transcribe(audio: Blob, lang: string): Promise<Transcript>
     method: "POST",
     headers: { "xi-api-key": key() },
     body: form,
-    signal: AbortSignal.timeout(7000),
+    signal: AbortSignal.timeout(10_000),
   });
   if (!res.ok) await fail(res, "speech-to-text");
   const data = (await res.json()) as {

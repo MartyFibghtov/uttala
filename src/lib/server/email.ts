@@ -1,3 +1,5 @@
+import { SITE } from "../site";
+
 const escapeHtml = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] as string);
 
@@ -26,7 +28,7 @@ export async function sendEmail({ to, subject, lines, action }: Message): Promis
     (action
       ? `<p><a href="${escapeHtml(action.url)}" style="display:inline-block;background:#111;color:#fff;padding:10px 18px;border-radius:999px;text-decoration:none">${escapeHtml(action.label)}</a></p>`
       : "") +
-    `<p style="color:#777;font-size:13px">Uttala</p></div>`;
+    `<p style="color:#777;font-size:13px">${escapeHtml(SITE.name)}</p></div>`;
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },

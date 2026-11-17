@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -14,7 +15,8 @@ import {
   Users,
 } from "lucide-react";
 import { Logo } from "@/components/app-shell";
-import { Orb, OrbCluster } from "@/components/orb";
+import { ARTWORKS, ArtworkFrame, type ArtworkName } from "@/components/artwork";
+import { Orb } from "@/components/orb";
 import { Pricing } from "@/components/pricing";
 import { Button } from "@/components/ui/button";
 import { CONTENT, languageSlug } from "@/components/marketing-pages";
@@ -148,9 +150,13 @@ function ResultPreview() {
     ["this", "ok"],
     ["Thursday", "bad"],
   ];
-  const style = { ok: "", unclear: "bg-amber-100 text-amber-950", bad: "bg-red-100 text-red-950" };
+  const style = {
+    ok: "",
+    unclear: "bg-amber-100 text-amber-950 dark:bg-amber-950/60 dark:text-amber-200",
+    bad: "bg-red-100 text-red-950 dark:bg-red-950/60 dark:text-red-200",
+  };
   return (
-    <div className="relative w-full max-w-md rounded-2xl border bg-card/95 p-5 shadow-xl backdrop-blur" aria-hidden>
+    <div className="relative w-full max-w-md rounded-2xl border bg-card/90 p-5 shadow-2xl ring-1 ring-black/5 backdrop-blur-md dark:ring-white/10" aria-hidden>
       <p className="text-lg leading-loose">
         {words.map(([w, s], i) => (
           <span key={i}>
@@ -173,21 +179,24 @@ function ResultPreview() {
   );
 }
 
-const STEPS = [
+const STEPS: { icon: typeof Ear; title: string; body: string; artwork: ArtworkName }[] = [
   {
     icon: Ear,
     title: "Listen",
-    body: "Hear any text read by a native voice. Tap a single word to hear only that word, at full speed or slowed down.",
+    body: "Hear a short sentence said by a native voice. Tap a single word to hear only that word, at full speed or slowed down.",
+    artwork: "stepListen",
   },
   {
     icon: Mic,
-    title: "Record",
-    body: "Read it aloud. Up to thirty seconds is enough to show where a listener would lose you.",
+    title: "Say it",
+    body: "Say the hard words on their own, then the whole sentence. A few seconds is enough to show where a listener would lose you.",
+    artwork: "stepRecord",
   },
   {
     icon: ListChecks,
     title: "Fix what matters",
-    body: "Every word is coloured by how clearly it came through. The weak ones go to short drills until you nail them three times, then come back for spaced checks.",
+    body: "Every word is coloured by how clearly it came through. The weak ones go to drills, first alone, then in a short sentence, until you nail them three times. Then they come back for spaced checks.",
+    artwork: "stepFix",
   },
 ];
 
@@ -216,7 +225,7 @@ const FAQ = [
   },
   {
     q: "Will this remove my accent?",
-    a: "The first goal is being understood easily, and most people get there well before their accent disappears. If you want to go further, the advanced level scores strictly and puts extra weight on rhythm and melody, which is where a remaining accent usually lives. No tool can promise a native accent; this one shows you precisely what is still different.",
+    a: "The first goal is being understood easily, and most people get there well before their accent disappears. If you want to go further, the advanced level brings texts that test rhythm and melody, which is where a remaining accent usually lives. No tool can promise a native accent; this one shows you precisely what is still different.",
   },
   {
     q: "Is my voice stored?",
@@ -236,14 +245,24 @@ export function Landing() {
   return (
     <>
       <section className="aurora-wash relative overflow-hidden border-b">
-        <OrbCluster className="hidden opacity-90 lg:block" />
+        <div aria-hidden className="hero-artwork-mask pointer-events-none absolute inset-0">
+          <Image
+            src={ARTWORKS.heroAcoustic.src}
+            alt=""
+            fill
+            sizes="100vw"
+            loading="eager"
+            fetchPriority="high"
+            className="object-cover object-right opacity-85 dark:opacity-30 dark:brightness-90"
+          />
+        </div>
         <div className="relative mx-auto grid max-w-6xl gap-10 px-4 py-16 md:px-8 md:py-24 lg:grid-cols-[minmax(0,1fr)_420px] lg:items-center">
           <div>
             <h1 className="max-w-xl text-4xl font-semibold tracking-tight md:text-6xl">
               Sound clear. Then sound native.
             </h1>
             <p className="mt-5 max-w-xl text-lg text-muted-foreground">
-              Read aloud, and Uttala shows which words a listener would miss, how your rhythm and melody compare with
+              Read aloud, and {SITE.name} shows which words a listener would miss, how your rhythm and melody compare with
               a native voice, and exactly what to practise next.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3">
@@ -277,17 +296,25 @@ export function Landing() {
 
       <section id="how" className="mx-auto max-w-6xl scroll-mt-20 px-4 py-16 md:px-8 md:py-20">
         <h2 className="text-3xl font-semibold tracking-tight">Two minutes from text to feedback</h2>
-        <div className="mt-8 grid gap-4 md:grid-cols-3">
-          {STEPS.map(({ icon: Icon, title, body }, i) => (
-            <div key={title} className="rounded-2xl border bg-card p-6">
-              <div className="flex items-center gap-3">
-                <span className="flex size-9 items-center justify-center rounded-full bg-secondary">
-                  <Icon className="size-4" />
-                </span>
-                <span className="text-sm text-muted-foreground">Step {i + 1}</span>
+        <div className="mt-8 grid gap-5 md:grid-cols-3">
+          {STEPS.map(({ icon: Icon, title, body, artwork }, i) => (
+            <div key={title} className="group flex flex-col overflow-hidden rounded-2xl border bg-card p-4 transition-shadow hover:shadow-md">
+              <ArtworkFrame
+                name={artwork}
+                sizes="(max-width: 768px) 100vw, 33vw"
+                className="aspect-[4/3] w-full rounded-xl"
+                imgClassName="group-hover:scale-[1.02]"
+              />
+              <div className="px-2 pt-4 pb-2">
+                <div className="flex items-center gap-2.5">
+                  <span className="flex size-8 items-center justify-center rounded-full bg-secondary">
+                    <Icon className="size-4" />
+                  </span>
+                  <span className="text-xs font-medium text-muted-foreground">Step {i + 1}</span>
+                </div>
+                <h3 className="mt-3 text-lg font-semibold">{title}</h3>
+                <p className="mt-1.5 text-sm text-muted-foreground">{body}</p>
               </div>
-              <h3 className="mt-4 text-lg font-semibold">{title}</h3>
-              <p className="mt-1.5 text-sm text-muted-foreground">{body}</p>
             </div>
           ))}
         </div>
@@ -297,7 +324,7 @@ export function Landing() {
         <div className="mx-auto max-w-6xl px-4 py-16 md:px-8 md:py-20">
           <h2 className="text-3xl font-semibold tracking-tight">It meets you where you are</h2>
           <p className="mt-2 max-w-2xl text-muted-foreground">
-            Tell us your level and the texts, the pace and the strictness of scoring change with it.
+            Tell us your level and the texts and the pace change with it. Scoring stays on one scale.
           </p>
           <div className="mt-8 grid gap-4 md:grid-cols-3">
             {LEVEL_IDS.map((id, i) => (

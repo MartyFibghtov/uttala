@@ -8,7 +8,7 @@ export const stripeEnabled = () => !!process.env.STRIPE_SECRET_KEY;
 
 export function stripe(): Stripe {
   if (!process.env.STRIPE_SECRET_KEY) throw new Error("Payments are not configured.");
-  return (client ??= new Stripe(process.env.STRIPE_SECRET_KEY, { appInfo: { name: "Uttala" } }));
+  return (client ??= new Stripe(process.env.STRIPE_SECRET_KEY, { appInfo: { name: "SayClear" } }));
 }
 
 export interface SubscriptionRow {
@@ -91,7 +91,7 @@ export async function checkoutUrl(
     billing_address_collection: "auto",
     customer_update: { address: "auto", name: "auto" },
     ...(process.env.STRIPE_AUTOMATIC_TAX === "true" ? { automatic_tax: { enabled: true } } : {}),
-    integration_identifier: `uttala_checkout_${randomLetters(8)}`,
+    integration_identifier: `sayclear_checkout_${randomLetters(8)}`,
     success_url: `${origin}/account?checkout=success`,
     cancel_url: `${origin}/account?checkout=cancelled`,
   });
@@ -114,9 +114,9 @@ function planOfSubscription(sub: Stripe.Subscription): { plan: PlanId; interval:
   const price = sub.items.data[0]?.price;
   const byKey = parseLookupKey(price?.lookup_key);
   if (byKey) return byKey;
-  // Fallback for prices created by hand: the setup script names products uttala_plus / uttala_pro.
+  // Fallback for prices created by hand: the setup script names products sayclear_plus / sayclear_pro.
   const product = typeof price?.product === "string" ? price.product : price?.product?.id;
-  const plan = PAID_PLANS.find((p) => product === `uttala_${p}`);
+  const plan = PAID_PLANS.find((p) => product === `sayclear_${p}` || product === `uttala_${p}`);
   const every = price?.recurring?.interval;
   const interval: Interval | null = every === "month" ? "month" : every === "year" ? "year" : null;
   return { plan: plan ?? "free", interval };

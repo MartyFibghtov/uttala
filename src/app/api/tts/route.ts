@@ -3,6 +3,7 @@ import { isLevel } from "@/lib/levels";
 import { consumeVoiceChars, getAccess, getUser, unauthorized } from "@/lib/server/account";
 import { cachedSpeech, hasElevenLabs, pickVoice, synthesize } from "@/lib/server/elevenlabs";
 import { isGeneratedText } from "@/lib/server/openai";
+import { SHORT } from "@/lib/short";
 import { tokenize } from "@/lib/text";
 
 export const maxDuration = 60;
@@ -19,8 +20,8 @@ export async function POST(request: Request) {
     | null;
   const text = (body?.text ?? "").trim();
   const lang = body?.lang ?? "";
-  if (!text || text.length > 600) {
-    return Response.json({ error: "Text must be 1–600 characters." }, { status: 400 });
+  if (!text || text.length > SHORT.chars) {
+    return Response.json({ error: `Text must be 1–${SHORT.chars} characters.` }, { status: 400 });
   }
   if (!isLanguage(lang)) {
     return Response.json({ error: "Unsupported language." }, { status: 400 });

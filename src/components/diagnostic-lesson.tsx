@@ -32,6 +32,7 @@ import { Ring } from "@/components/charts";
 import { LiveBars } from "@/components/live-bars";
 import { Orb, paletteForScore, type OrbPalette } from "@/components/orb";
 import { PitchChart } from "@/components/pitch-chart";
+import { WordCompareControls } from "@/components/word-compare";
 import {
   hear,
   loadReference,
@@ -49,6 +50,7 @@ import {
   decodeToMono16k,
   encodeWav,
   play,
+  playWordSlice,
   refineSpansWithAudio,
   SAMPLE_RATE,
   stopPlayback,
@@ -62,6 +64,8 @@ import {
 import { LEVELS, statusFor, type LevelId } from "@/lib/levels";
 import { enrichWordDiagnostics, extractFocusSounds, segmentWordToPhonemes } from "@/lib/phonetics";
 import { compareProsody, fallbackProsody, overallScore } from "@/lib/prosody";
+import { preloadRatingModel, rateWithDeductions } from "@/lib/rating";
+import { SCORE_BANDS } from "@/lib/score-bands";
 import { soundForIpa, soundsFor } from "@/lib/sounds";
 import { recordAttempt } from "@/lib/store";
 import { tokenize } from "@/lib/text";
@@ -94,58 +98,59 @@ export interface SpeechRank {
 export const SPEECH_RANKS: SpeechRank[] = [
   {
     id: "native",
-    min: 92,
-    label: "Native",
+    min: 90,
+    label: "Native-like",
     recommended: "advanced",
     palette: "moss",
-    short: "92–100%",
-    description: "Listeners follow you without effort. Your vowel quality, consonant timing and pitch melody sound natural.",
+    short: "90–100%",
+    description:
+      "Every word we checked matched a native speaker. Subtle traits we do not measure yet, such as voice placement, can still give an accent away.",
     coachMessage: (name) =>
-      `${name ? `${name}, you` : "You"} sound remarkably natural. Native speakers understand you effortlessly, and both your rhythm and melody are right on target. We will focus on subtle polish at full conversational speed.`,
+      `${name ? `${name}, every` : "Every"} word we checked matched a native speaker. What remains, if anything, is in details like voice placement and melody, so keep comparing yourself with the reference.`,
   },
   {
     id: "proficient",
-    min: 82,
+    min: 80,
     label: "Proficient",
     recommended: "advanced",
     palette: "moss",
-    short: "82–91%",
-    description: "Native speakers understand you clearly, though a few subtle sounds or pitch patterns still hint at an accent.",
+    short: "80–89%",
+    description: "Easy to understand, with a slight accent: a few words or sounds came out a little different from a native speaker.",
     coachMessage: (name) =>
-      `${name ? `${name}, you` : "You"} sound good. Native speakers understand you clearly, but will notice an accent on a few sounds and melody turns. We'll target a few focused changes that make a big difference.`,
+      `${name ? `${name}, you` : "You"} are easy to understand. A few words still came out a little different from a native speaker; those are your next targets.`,
   },
   {
     id: "advanced",
-    min: 72,
+    min: 70,
     label: "Advanced",
     recommended: "intermediate",
     palette: "sky",
-    short: "72–81%",
-    description: "Your speech is clear in everyday conversation. Refining word stress, linking and a handful of vowels will smooth out your flow.",
+    short: "70–79%",
+    description: "Clear in everyday conversation, though a noticeable accent remains in vowel quality, word stress or sentence flow.",
     coachMessage: (name) =>
-      `${name ? `${name}, your` : "Your"} speech comes through clearly. Listeners follow your meaning well, and tightening a few recurring sounds and your sentence rhythm will make you sound much more effortless.`,
+      `${name ? `${name}, your` : "Your"} speech comes through clearly. Listeners follow your meaning well, and tightening a few recurring sounds and your sentence rhythm will bring you closer to native.`,
   },
   {
     id: "intermediate",
-    min: 60,
+    min: 58,
     label: "Intermediate",
     recommended: "intermediate",
     palette: "gold",
-    short: "60–71%",
-    description: "People understand your main message, with the occasional word or contrast they have to work out from context.",
+    short: "58–69%",
+    description: "People understand your main message, though recurring sound substitutions and uneven stress make listeners work harder.",
     coachMessage: (name) =>
-      `${name ? `${name}, you` : "You"} have a solid foundation. People get your message, though a few key sounds make listeners work a little harder. Practising those contrasts first will raise your score quickly.`,
+      `${name ? `${name}, you` : "You"} have a workable foundation. People get your main message, though several key sounds and stress patterns still need focused practice.`,
   },
   {
     id: "beginner",
-    min: 45,
+    min: 40,
     label: "Beginner",
     recommended: "beginner",
     palette: "gold",
-    short: "45–59%",
-    description: "Familiar phrases come through, while longer sentences and new sounds still need deliberate pacing.",
+    short: "40–57%",
+    description: "Familiar words are recognizable, while longer sentences and harder sounds need deliberate pacing and ear training.",
     coachMessage: (name) =>
-      `${name ? `${name}, several` : "Several"} core sounds are already coming through. We will slow things down and train one difficult word and sound at a time so whole sentences become comfortable.`,
+      `${name ? `${name}, several` : "Several"} familiar words are coming through, though most sentences still carry heavy accent interference. We will train one difficult word and sound at a time.`,
   },
   {
     id: "novice",
@@ -153,7 +158,7 @@ export const SPEECH_RANKS: SpeechRank[] = [
     label: "Novice",
     recommended: "beginner",
     palette: "ember",
-    short: "0–44%",
+    short: "0–39%",
     description: "Just starting out: many sounds and pitch patterns are new to your ear and mouth. Short phrases and ear drills are the fastest way up.",
     coachMessage: (name, langName) =>
       `${name ? `${name}, welcome` : "Welcome"} to ${langName}. We will start by training your ear and mouth on the most important sounds and short phrases step by step.`,
@@ -505,7 +510,7 @@ export function buildSimulatedTake(prompt: DiagnosticPrompt, lang: string, stage
       start,
       end: start + span * 0.86,
       score,
-      status: statusFor(score, DIAGNOSTIC_SCORING_LEVEL),
+      status: statusFor(score),
     };
     return enrichWordDiagnostics(w, lang);
   });
@@ -523,7 +528,6 @@ export function buildSimulatedTake(prompt: DiagnosticPrompt, lang: string, stage
       rhythm: prosody.rhythm,
       intonation: prosody.intonation,
     },
-    DIAGNOSTIC_SCORING_LEVEL,
   );
 
   const result: AssessResult = {
@@ -565,7 +569,7 @@ export function buildSimulatedTake(prompt: DiagnosticPrompt, lang: string, stage
   };
 }
 
-/** Conversational coach header card in Uttala's Orb + Card design language. */
+/** Conversational coach header card in SayClear's Orb + Card design language. */
 export function CoachBanner({
   palette = "orchid",
   label = "Coach",
@@ -632,12 +636,18 @@ export function ExpandableHighlightRow({
   tone,
   lang,
   live,
+  findTakeWord,
 }: {
   item: HighlightItem;
   tone: "good" | "bad";
   lang: string;
   live: boolean;
+  findTakeWord?: (wordText: string) => { word: WordResult; take: DiagnosticTake } | undefined;
 }) {
+  const [pickedWord, setPickedWord] = useState<string | null>(null);
+  const activeWordText = pickedWord ?? item.detail.words[0] ?? null;
+  const matched = activeWordText && findTakeWord ? findTakeWord(activeWordText) : undefined;
+
   return (
     <details className="disclosure group rounded-xl border bg-background transition-colors open:bg-secondary/30">
       <summary className="flex items-center justify-between gap-3 px-3.5 py-3 text-left select-none">
@@ -700,33 +710,81 @@ export function ExpandableHighlightRow({
         )}
 
         {item.detail.words.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-            <span className="text-muted-foreground">Tap to hear:</span>
-            {item.detail.words.map((w) => (
-              <button
-                key={w}
-                type="button"
-                lang={lang}
-                onClick={() => void hear(w, { lang, level: DIAGNOSTIC_SCORING_LEVEL, live })}
-                className="inline-flex items-center gap-1 rounded-full border bg-card px-2.5 py-1 font-medium text-foreground transition-colors hover:bg-secondary"
-              >
-                <Volume2 className="size-3 text-muted-foreground" />
-                {w}
-              </button>
-            ))}
-            {item.detail.soundId && (
-              <Link
-                href={`/sounds/${item.detail.soundId}`}
-                className="ml-auto font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-              >
-                Sound guide →
-              </Link>
+          <div className="space-y-2 pt-0.5">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-muted-foreground">Words:</span>
+              {item.detail.words.map((w) => {
+                const isSelected = activeWordText === w;
+                return (
+                  <button
+                    key={w}
+                    type="button"
+                    lang={lang}
+                    onClick={() => {
+                      setPickedWord(w);
+                      if (!findTakeWord) {
+                        void hear(w, { lang, level: DIAGNOSTIC_SCORING_LEVEL, live });
+                      }
+                    }}
+                    className={cn(
+                      "inline-flex items-center gap-1 rounded-full border bg-card px-2.5 py-1 font-medium text-foreground transition-colors hover:bg-secondary",
+                      findTakeWord && isSelected && "border-foreground bg-secondary",
+                    )}
+                  >
+                    <Volume2 className="size-3 text-muted-foreground" />
+                    {w}
+                  </button>
+                );
+              })}
+              {item.detail.soundId && (
+                <Link
+                  href={`/sounds/${item.detail.soundId}`}
+                  className="ml-auto font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                >
+                  Sound guide →
+                </Link>
+              )}
+            </div>
+            {matched && matched.take.userUrl && (
+              <div className="rounded-lg border bg-secondary/30 p-2.5">
+                <WordCompareControls
+                  word={matched.word}
+                  lang={lang}
+                  showHeader
+                  compact
+                  canPlaySelf={matched.word.start !== undefined && matched.word.end !== undefined}
+                  canPlayTarget
+                  onPlaySelf={(intentId) =>
+                    playWordSlice(matched.take.userUrl!, matched.word, { intentId })
+                  }
+                  onPlayTarget={(intentId) =>
+                    hear(matched.word.text, { lang, level: DIAGNOSTIC_SCORING_LEVEL, live, intentId })
+                  }
+                />
+              </div>
             )}
           </div>
         )}
       </div>
     </details>
   );
+}
+
+function lookupTakeWord(
+  takes: DiagnosticTake[],
+  wordText: string,
+): { word: WordResult; take: DiagnosticTake } | undefined {
+  const target = wordText.toLowerCase();
+  let best: { word: WordResult; take: DiagnosticTake } | undefined;
+  for (const take of takes) {
+    for (const word of take.result.words) {
+      if (word.text.toLowerCase() !== target) continue;
+      if (!best || word.score < best.word.score) {
+        best = { word, take };
+      }
+    }
+  }
+  return best;
 }
 
 /**
@@ -760,6 +818,10 @@ export function DiagnosticStageRecorder({
   const outOfRecordings = me.usage.used >= me.usage.limit;
 
   useEffect(() => stopPlayback, []);
+  // Fetch the sound model early so it is ready by the first recording (about 240 MB, once).
+  useEffect(() => {
+    preloadRatingModel().catch(() => undefined);
+  }, []);
 
   // Preload reference audio in the background so it is ready by the time the learner finishes recording.
   useEffect(() => {
@@ -767,22 +829,32 @@ export function DiagnosticStageRecorder({
     void loadReference(prompt.text.trim(), lang, DIAGNOSTIC_SCORING_LEVEL).catch(() => null);
   }, [lang, live, prompt.text]);
 
-  const listen = async (wordIndex?: number) => {
+  const listen = async (wordIndex?: number, opts?: { inSentence?: boolean; intentId?: number }) => {
     const rate = slow ? 0.75 : 1;
     const textToPlay = wordIndex === undefined ? prompt.text : (tokens[wordIndex]?.text ?? "");
     if (!textToPlay) return;
     if (!live) {
-      speakWithBrowser(textToPlay, lang, rate);
+      await speakWithBrowser(textToPlay, lang, rate, opts?.intentId);
       return;
     }
-    setListening(true);
+    if (opts?.intentId === undefined) setListening(true);
     try {
-      await hear(textToPlay, { lang, level: DIAGNOSTIC_SCORING_LEVEL, live, rate });
+      if (opts?.inSentence && wordIndex !== undefined && savedTake?.reference?.spans[wordIndex]) {
+        const span = savedTake.reference.spans[wordIndex]!;
+        await play(savedTake.reference.url, {
+          from: Math.max(0, span.start - 0.015),
+          to: span.end + 0.02,
+          rate,
+          intentId: opts.intentId,
+        });
+        return;
+      }
+      await hear(textToPlay, { lang, level: DIAGNOSTIC_SCORING_LEVEL, live, rate, intentId: opts?.intentId });
     } catch (err) {
       if (err instanceof UpgradeNeeded) promptUpgrade(err.reason);
       else toast.error(err instanceof Error ? err.message : "Could not play the reference.");
     } finally {
-      setListening(false);
+      if (opts?.intentId === undefined) setListening(false);
     }
   };
 
@@ -806,19 +878,22 @@ export function DiagnosticStageRecorder({
           ? loadReference(prompt.text.trim(), lang, DIAGNOSTIC_SCORING_LEVEL).catch(() => null)
           : Promise.resolve(null);
         const res = await fetch("/api/assess", { method: "POST", body: form });
-        const data = (await res.json()) as AssessResult & { error?: string; upgrade?: "limit" | "customText" };
-        if (data.upgrade) {
-          promptUpgrade(data.upgrade);
+        const engine = (await res.json()) as AssessResult & { error?: string; upgrade?: "limit" | "customText" };
+        if (engine.upgrade) {
+          promptUpgrade(engine.upgrade);
           return;
         }
-        if (!res.ok) throw new Error(data.error ?? "Assessment failed.");
+        if (!res.ok) throw new Error(engine.error ?? "Assessment failed.");
         noteAnalysis();
 
-        // Never stall the diagnostic result on slow reference TTS synthesis.
+        // The deduction rating needs the native reading; wait for it, but not indefinitely.
         const reference = await Promise.race([
           refPromise,
-          new Promise<null>((resolve) => setTimeout(() => resolve(null), 180)),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 15000)),
         ]);
+        // Main rating: score by deduction from the on-device sound model (src/lib/rating.ts).
+        const rated = await rateWithDeductions(samples, engine, reference, lang);
+        const data = rated.result;
 
         const refinedUserSpans = refineSpansWithAudio(
           samples,
@@ -835,7 +910,7 @@ export function DiagnosticStageRecorder({
         });
 
         const userPitch = trackPitch(samples);
-        const rawProsody = reference
+        const rawProsody = rated.prosody ?? (reference
           ? compareProsody(
               data.words.map((w) =>
                 w.start !== undefined && w.end !== undefined ? { start: w.start, end: w.end } : null,
@@ -844,7 +919,7 @@ export function DiagnosticStageRecorder({
               userPitch,
               reference.pitch,
             )
-          : null;
+          : null);
 
         const prosody =
           rawProsody && rawProsody.rhythm !== null && rawProsody.intonation !== null
@@ -908,6 +983,10 @@ export function DiagnosticStageRecorder({
     savedTake && selectedWordIdx !== null
       ? (savedTake.result.words[selectedWordIdx] ?? savedTake.result.words[0])
       : savedTake?.result.words[0];
+  const findInStage = useCallback(
+    (w: string) => (savedTake ? lookupTakeWord([savedTake], w) : undefined),
+    [savedTake],
+  );
 
   return (
     <div className="space-y-5">
@@ -944,10 +1023,7 @@ export function DiagnosticStageRecorder({
                         <button
                           key={w.index}
                           type="button"
-                          onClick={() => {
-                            setSelectedWordIdx(w.index);
-                            void listen(w.index);
-                          }}
+                          onClick={() => setSelectedWordIdx(w.index)}
                           className={cn(
                             "rounded-md px-0.5 transition-colors",
                             WORD_STATUS_STYLE[w.status],
@@ -1002,8 +1078,35 @@ export function DiagnosticStageRecorder({
                 <Lightbulb className="size-3.5 shrink-0 text-amber-500" />
                 {prompt.cue}
               </span>
-              {!savedTake && <span>Tap any word to hear it alone</span>}
+              <span>
+                {savedTake
+                  ? "Tap any word above to compare how you said it vs. how it should sound"
+                  : "Tap any word to hear it alone"}
+              </span>
             </div>
+
+            {savedTake && selectedWord && (
+              <div className="mt-3 rounded-xl border bg-secondary/35 p-3">
+                <WordCompareControls
+                  word={selectedWord}
+                  lang={lang}
+                  showHeader
+                  compact
+                  canPlaySelf={Boolean(
+                    savedTake.userUrl && selectedWord.start !== undefined && selectedWord.end !== undefined,
+                  )}
+                  canPlayTarget
+                  canPlayInSentence={Boolean(live && savedTake.reference?.spans[selectedWord.index])}
+                  onPlaySelf={(intentId) =>
+                    savedTake.userUrl
+                      ? playWordSlice(savedTake.userUrl, selectedWord, { rate: slow ? 0.75 : 1, intentId })
+                      : Promise.resolve()
+                  }
+                  onPlayTarget={(intentId) => listen(selectedWord.index, { intentId })}
+                  onPlayInSentence={(intentId) => listen(selectedWord.index, { inSentence: true, intentId })}
+                />
+              </div>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center gap-2 border-t px-4 py-3">
@@ -1093,7 +1196,14 @@ export function DiagnosticStageRecorder({
                   What sound or melody was good
                 </p>
                 {highlights.good.map((item) => (
-                  <ExpandableHighlightRow key={item.id} item={item} tone="good" lang={lang} live={live} />
+                  <ExpandableHighlightRow
+                    key={item.id}
+                    item={item}
+                    tone="good"
+                    lang={lang}
+                    live={live}
+                    findTakeWord={findInStage}
+                  />
                 ))}
               </div>
 
@@ -1103,7 +1213,14 @@ export function DiagnosticStageRecorder({
                   What sound or melody needs work
                 </p>
                 {highlights.bad.map((item) => (
-                  <ExpandableHighlightRow key={item.id} item={item} tone="bad" lang={lang} live={live} />
+                  <ExpandableHighlightRow
+                    key={item.id}
+                    item={item}
+                    tone="bad"
+                    lang={lang}
+                    live={live}
+                    findTakeWord={findInStage}
+                  />
                 ))}
               </div>
             </div>
@@ -1157,14 +1274,19 @@ export function DiagnosticStageRecorder({
                             key={idx}
                             className={cn(
                               "inline-flex items-center gap-1 rounded-md border px-2 py-0.5 font-mono text-xs",
-                              p.score >= 80
+                              !selectedWord.phonemesMeasured
+                                ? "bg-background text-foreground"
+                                : p.score >= 80
                                 ? "bg-emerald-50/70 text-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-200"
                                 : p.score >= 60
                                   ? "bg-amber-50/70 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200"
                                   : "bg-red-50/70 text-red-900 dark:bg-red-950/30 dark:text-red-200",
                             )}
                           >
-                            /{p.ipa}/ <span className="tabular-nums font-sans font-semibold">{p.score}</span>
+                            /{p.ipa}/
+                            {selectedWord.phonemesMeasured && (
+                              <span className="tabular-nums font-sans font-semibold">{p.score}</span>
+                            )}
                           </span>
                         ))}
                       </div>
@@ -1174,6 +1296,23 @@ export function DiagnosticStageRecorder({
                         {selectedWord.diagnosis} {selectedWord.fix}
                       </p>
                     )}
+                    <WordCompareControls
+                      word={selectedWord}
+                      lang={lang}
+                      compact
+                      canPlaySelf={Boolean(
+                        savedTake.userUrl && selectedWord.start !== undefined && selectedWord.end !== undefined,
+                      )}
+                      canPlayTarget
+                      canPlayInSentence={Boolean(live && savedTake.reference?.spans[selectedWord.index])}
+                      onPlaySelf={(intentId) =>
+                        savedTake.userUrl
+                          ? playWordSlice(savedTake.userUrl, selectedWord, { rate: slow ? 0.75 : 1, intentId })
+                          : Promise.resolve()
+                      }
+                      onPlayTarget={(intentId) => listen(selectedWord.index, { intentId })}
+                      onPlayInSentence={(intentId) => listen(selectedWord.index, { inSentence: true, intentId })}
+                    />
                   </div>
                 )}
 
@@ -1339,7 +1478,7 @@ export function SpeechLevelRankingScreen({
             </details>
           </div>
 
-          {/* Right column: Vertical Speech Level Ladder (inspired by Reference Image 2, styled in Uttala's design) */}
+          {/* Right column: Vertical Speech Level Ladder (inspired by Reference Image 2, styled in SayClear's design) */}
           <div className="relative mx-auto flex w-full max-w-xs items-stretch justify-end py-2 pl-28 pr-2">
             {/* Floating user score callout pointing to their spot on the vertical ladder */}
             <div
@@ -1451,12 +1590,13 @@ export function GoodAndBadBreakdownScreen({
   const live = me.engines.elevenlabs;
   const { good, bad } = useMemo(() => extractHighlightsFromTakes(takes, lang, 3), [takes, lang]);
   const melodyTake = takes.find((t) => t.prompt.kind === "melody") ?? takes[takes.length - 1];
+  const findWord = useCallback((w: string) => lookupTakeWord(takes, w), [takes]);
 
   return (
     <div className="space-y-5">
       <CoachBanner palette="gold" label="Strengths & Focus Areas">
         We kept this simple: only what sounded good and what held you back. Tap any item to expand how to articulate
-        it and hear the words from your scan.
+        it and compare your voice against the target on each word.
       </CoachBanner>
 
       <div className="grid gap-5 md:grid-cols-2">
@@ -1474,7 +1614,14 @@ export function GoodAndBadBreakdownScreen({
           </CardHeader>
           <CardContent className="space-y-2.5">
             {good.map((item) => (
-              <ExpandableHighlightRow key={item.id} item={item} tone="good" lang={lang} live={live} />
+              <ExpandableHighlightRow
+                key={item.id}
+                item={item}
+                tone="good"
+                lang={lang}
+                live={live}
+                findTakeWord={findWord}
+              />
             ))}
           </CardContent>
         </Card>
@@ -1493,7 +1640,14 @@ export function GoodAndBadBreakdownScreen({
           </CardHeader>
           <CardContent className="space-y-2.5">
             {bad.map((item) => (
-              <ExpandableHighlightRow key={item.id} item={item} tone="bad" lang={lang} live={live} />
+              <ExpandableHighlightRow
+                key={item.id}
+                item={item}
+                tone="bad"
+                lang={lang}
+                live={live}
+                findTakeWord={findWord}
+              />
             ))}
           </CardContent>
         </Card>
@@ -1534,43 +1688,20 @@ export function ScoringAndPlanScreen({
   takes: DiagnosticTake[];
   lang: string;
 }) {
+  const { me } = useAccount();
+  const live = me.engines.elevenlabs;
   const avgScore = Math.round(takes.reduce((s, t) => s + t.attempt.overall, 0) / Math.max(1, takes.length));
   const lessonWords = useMemo(() => extractLessonWords(takes, lang, 6), [takes, lang]);
+  const [selectedPlanIdx, setSelectedPlanIdx] = useState(0);
+  const selectedPlanItem = lessonWords[selectedPlanIdx] ?? lessonWords[0];
 
-  const bands = [
-    {
-      range: "90–100%",
-      label: "Excellent",
-      bar: "bg-emerald-500",
-      wash: "from-emerald-500/20 via-emerald-500/5 to-transparent",
-      text: "text-emerald-700 dark:text-emerald-400",
-      detail: "Native-like sound clarity, natural word stress and smooth pitch melody.",
-    },
-    {
-      range: "80–89%",
-      label: "Good",
-      bar: "bg-amber-400",
-      wash: "from-amber-400/20 via-amber-400/5 to-transparent",
-      text: "text-amber-700 dark:text-amber-300",
-      detail: "Understood effortlessly; only minor vowel or timing habits show an accent.",
-    },
-    {
-      range: "60–79%",
-      label: "Fair",
-      bar: "bg-orange-500",
-      wash: "from-orange-500/20 via-orange-500/5 to-transparent",
-      text: "text-orange-700 dark:text-orange-400",
-      detail: "Understood in context, though a sound substitution or stress shift stood out.",
-    },
-    {
-      range: "0–59%",
-      label: "Weak",
-      bar: "bg-red-500",
-      wash: "from-red-500/20 via-red-500/5 to-transparent",
-      text: "text-red-700 dark:text-red-400",
-      detail: "Hard for a listener to catch without effort; queued for focused word drills.",
-    },
+  const bandStyles = [
+    { bar: "bg-emerald-500", wash: "from-emerald-500/20 via-emerald-500/5 to-transparent", text: "text-emerald-700 dark:text-emerald-400" },
+    { bar: "bg-amber-400", wash: "from-amber-400/20 via-amber-400/5 to-transparent", text: "text-amber-700 dark:text-amber-300" },
+    { bar: "bg-orange-500", wash: "from-orange-500/20 via-orange-500/5 to-transparent", text: "text-orange-700 dark:text-orange-400" },
+    { bar: "bg-red-500", wash: "from-red-500/20 via-red-500/5 to-transparent", text: "text-red-700 dark:text-red-400" },
   ];
+  const bands = SCORE_BANDS.map((b, i) => ({ ...b, range: `${b.range}%`, ...bandStyles[i] }));
 
   return (
     <div className="space-y-5">
@@ -1580,7 +1711,7 @@ export function ScoringAndPlanScreen({
       </CoachBanner>
 
       <div className="grid gap-5 lg:grid-cols-2">
-        {/* Left Card: Scoring Scale (Reference Image 4 concept in Uttala's design) */}
+        {/* Left Card: Scoring Scale (Reference Image 4 concept in SayClear's design) */}
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Scoring Scale</CardTitle>
@@ -1609,7 +1740,7 @@ export function ScoringAndPlanScreen({
           </CardContent>
         </Card>
 
-        {/* Right Card: Today's Lesson Plan Stepper (Reference Images 1 & 3 concept in Uttala's design) */}
+        {/* Right Card: Today's Lesson Plan Stepper (Reference Images 1 & 3 concept in SayClear's design) */}
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Your First Lesson Plan</CardTitle>
@@ -1677,22 +1808,56 @@ export function ScoringAndPlanScreen({
                     </Badge>
                   </div>
                   <p className="mt-0.5 text-xs text-muted-foreground">
-                    Picked from your lowest-scoring sounds in the scan:
+                    Picked from your lowest-scoring sounds in the scan — tap any word to compare:
                   </p>
                   <div className="mt-4 flex flex-wrap justify-center gap-2">
-                    {lessonWords.map(({ word }) => (
-                      <span
+                    {lessonWords.map(({ word }, idx) => (
+                      <button
                         key={`${word.index}-${word.text}`}
+                        type="button"
+                        onClick={() => setSelectedPlanIdx(idx)}
                         lang={lang}
-                        className="inline-flex items-center gap-1.5 rounded-xl border bg-background/90 px-3 py-1.5 text-sm font-medium shadow-2xs"
+                        className={cn(
+                          "inline-flex items-center gap-1.5 rounded-xl border bg-background/90 px-3 py-1.5 text-sm font-medium shadow-2xs transition-colors hover:bg-secondary",
+                          selectedPlanIdx === idx && "border-foreground ring-1 ring-foreground",
+                        )}
                       >
                         {word.text}
                         <span className={cn("text-xs font-semibold tabular-nums", scoreColor(word.score))}>
                           {word.score}%
                         </span>
-                      </span>
+                      </button>
                     ))}
                   </div>
+                  {selectedPlanItem && (
+                    <div className="mt-4 rounded-xl border bg-background/90 p-3 text-left">
+                      <WordCompareControls
+                        word={selectedPlanItem.word}
+                        lang={lang}
+                        showHeader
+                        compact
+                        canPlaySelf={Boolean(
+                          selectedPlanItem.take.userUrl &&
+                            selectedPlanItem.word.start !== undefined &&
+                            selectedPlanItem.word.end !== undefined,
+                        )}
+                        canPlayTarget
+                        onPlaySelf={(intentId) =>
+                          selectedPlanItem.take.userUrl
+                            ? playWordSlice(selectedPlanItem.take.userUrl, selectedPlanItem.word, { intentId })
+                            : Promise.resolve()
+                        }
+                        onPlayTarget={(intentId) =>
+                          hear(selectedPlanItem.word.text, {
+                            lang,
+                            level: DIAGNOSTIC_SCORING_LEVEL,
+                            live,
+                            intentId,
+                          })
+                        }
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1704,7 +1869,7 @@ export function ScoringAndPlanScreen({
 }
 
 /**
- * Feedback Screen 4: Guided Word-by-Word Practice Lesson (inspired by Reference Image 5, in Uttala's design).
+ * Feedback Screen 4: Guided Word-by-Word Practice Lesson (inspired by Reference Image 5, in SayClear's design).
  * Steps through the top 3 challenging words from the user's test with a score gauge, improvement badge,
  * syllable/phoneme pills, and an expandable intonation & articulation tip.
  */
@@ -1720,7 +1885,6 @@ export function WordPracticeLessonScreen({
   const targets = useMemo(() => extractLessonWords(takes, lang, 3), [takes, lang]);
   const [wordIdx, setWordIdx] = useState(0);
   const [slow, setSlow] = useState(false);
-  const [listening, setListening] = useState(false);
   const [busy, setBusy] = useState(false);
   const [overrides, setOverrides] = useState<
     Record<number, { word: WordResult; userUrl: string; score: number }>
@@ -1741,36 +1905,30 @@ export function WordPracticeLessonScreen({
     [activeWord, lang],
   );
 
-  const hearCoach = async () => {
+  const hearCoach = async (intentId?: number) => {
     if (!activeWord) return;
     const rate = slow ? 0.75 : 1;
     if (!live) {
-      speakWithBrowser(activeWord.text, lang, rate);
+      await speakWithBrowser(activeWord.text, lang, rate, intentId);
       return;
     }
-    setListening(true);
     try {
-      await hear(activeWord.text, { lang, level: DIAGNOSTIC_SCORING_LEVEL, live, rate });
+      await hear(activeWord.text, { lang, level: DIAGNOSTIC_SCORING_LEVEL, live, rate, intentId });
     } catch (err) {
       if (err instanceof UpgradeNeeded) promptUpgrade(err.reason);
       else toast.error(err instanceof Error ? err.message : "Could not play the reference.");
-    } finally {
-      setListening(false);
     }
   };
 
-  const hearSelf = async () => {
+  const hearSelf = async (intentId?: number) => {
+    const rate = slow ? 0.75 : 1;
     if (updated?.userUrl) {
-      await play(updated.userUrl, { rate: slow ? 0.75 : 1 });
+      await play(updated.userUrl, { rate, intentId });
       return;
     }
     const takeUrl = currentItem?.take.userUrl;
     if (takeUrl && initialWord?.start !== undefined && initialWord?.end !== undefined) {
-      await play(takeUrl, {
-        from: Math.max(0, initialWord.start - 0.02),
-        to: initialWord.end + 0.03,
-        rate: slow ? 0.75 : 1,
-      });
+      await playWordSlice(takeUrl, initialWord, { rate, intentId });
     } else {
       toast.message("Record this word once to hear your take.");
     }
@@ -1805,7 +1963,7 @@ export function WordPracticeLessonScreen({
         const scoredWord = data.words[0] ?? {
           ...activeWord,
           score: data.scores.accuracy,
-          status: statusFor(data.scores.accuracy, DIAGNOSTIC_SCORING_LEVEL),
+          status: statusFor(data.scores.accuracy),
         };
         recordAttempt(data, null, {
           lang,
@@ -1951,7 +2109,8 @@ export function WordPracticeLessonScreen({
                   key: `${p.ipa}-${i}`,
                   grapheme: segmented[i]?.grapheme ?? p.ipa,
                   ipa: p.ipa,
-                  score: p.score,
+                  // Colour by the word's score unless each sound was actually measured.
+                  score: activeWord.phonemesMeasured ? p.score : currentScore,
                 }))
               : segmented.map((s, i) => ({
                   key: `${s.ipa}-${i}`,
@@ -2007,28 +2166,18 @@ export function WordPracticeLessonScreen({
             </div>
           </details>
 
-          {/* Playback & Record Controls (Reference Image 5 layout in Uttala style) */}
-          <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="min-w-28 rounded-full"
-              onClick={() => void hearCoach()}
-              disabled={listening}
-            >
-              {listening ? <Loader2 className="animate-spin" /> : <Volume2 />}
-              Coach
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="min-w-28 rounded-full"
-              onClick={() => void hearSelf()}
-              disabled={!canPlaySelf}
-            >
-              <User />
-              You
-            </Button>
+          {/* Playback & Record Controls (Reference Image 5 layout in SayClear style) */}
+          <div className="mt-6 flex w-full max-w-md flex-col items-center gap-2">
+            <WordCompareControls
+              word={activeWord}
+              lang={lang}
+              className="w-full"
+              compact
+              canPlaySelf={canPlaySelf}
+              canPlayTarget
+              onPlaySelf={(intentId) => hearSelf(intentId)}
+              onPlayTarget={(intentId) => hearCoach(intentId)}
+            />
             <Button
               variant={slow ? "secondary" : "ghost"}
               size="sm"
@@ -2036,7 +2185,7 @@ export function WordPracticeLessonScreen({
               aria-pressed={slow}
               onClick={() => setSlow(!slow)}
             >
-              {slow ? "0.75×" : "1×"}
+              Speed: {slow ? "0.75×" : "1×"}
             </Button>
           </div>
 

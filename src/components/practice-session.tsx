@@ -24,6 +24,7 @@ import { toast } from "sonner";
 import { LiveBars } from "@/components/live-bars";
 import { Orb, paletteForScore } from "@/components/orb";
 import { PitchChart } from "@/components/pitch-chart";
+import { WordCompareControls } from "@/components/word-compare";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -36,25 +37,32 @@ import {
   encodeWav,
   play,
   playOverlay,
+  playWordSlice,
   refineSpansWithAudio,
   SAMPLE_RATE,
+  speakTextWithBrowser,
   stopPlayback,
   trackPitch,
   type PitchTrack,
 } from "@/lib/audio";
 import { getLanguage, type Phrase } from "@/lib/languages";
 import { LEVELS, type LevelId } from "@/lib/levels";
-import { compareProsody, fallbackProsody, overallScore } from "@/lib/prosody";
+import type { Deduction } from "@/lib/deductions";
+import { compareProsody, fallbackProsody, overallFor } from "@/lib/prosody";
+import { bandFor, DEPTH_NOTE } from "@/lib/score-bands";
+import { preloadRatingModel, rateWithDeductions } from "@/lib/rating";
 import { soundForIpa } from "@/lib/sounds";
+import { isShort, SHORT, splitShort, wordCount } from "@/lib/short";
 import { bestKey, recordAttempt, useStore } from "@/lib/store";
 import { timeTokens, tokenize, type Span } from "@/lib/text";
 import type { AssessResult, Attempt, FocusSound, ProsodyResult, TtsResponse, WordResult, WordStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-const MAX_TEXT = 600;
 
 export interface Reference {
   url: string;
+  /** The reference decoded to 16 kHz mono, when decoding worked. */
+  samples: Float32Array | null;
   spans: (Span | null)[];
   pitch: PitchTrack | null;
   duration: number;
@@ -95,7 +103,7 @@ export function loadReference(text: string, lang: string, level: LevelId, voiceI
         : data.chars.length
           ? data.chars[data.chars.length - 1].e
           : 0;
-      return { url: URL.createObjectURL(blob), spans, pitch, duration };
+      return { url: URL.createObjectURL(blob), samples, spans, pitch, duration };
     })();
     references.set(key, pending);
     pending.catch(() => references.delete(key));
@@ -103,40 +111,27 @@ export function loadReference(text: string, lang: string, level: LevelId, voiceI
   return pending;
 }
 
-export function speakWithBrowser(text: string, lang: string, rate: number) {
+export function speakWithBrowser(text: string, lang: string, rate: number, intentId?: number): Promise<void> {
   const locale = getLanguage(lang).azure ?? lang;
-  const u = new SpeechSynthesisUtterance(text);
-  u.lang = locale;
-  u.rate = rate;
-  const voices = window.speechSynthesis.getVoices?.() ?? [];
-  const normLocale = locale.toLowerCase();
-  const normLang = lang.toLowerCase();
-  const nativeVoice =
-    voices.find((v) => v.lang.toLowerCase() === normLocale && v.localService) ??
-    voices.find((v) => v.lang.toLowerCase() === normLocale) ??
-    voices.find((v) => v.lang.toLowerCase().startsWith(`${normLang}-`) && v.localService) ??
-    voices.find((v) => v.lang.toLowerCase().startsWith(`${normLang}-`) || v.lang.toLowerCase() === normLang);
-  if (nativeVoice) u.voice = nativeVoice;
-  window.speechSynthesis.cancel();
-  window.speechSynthesis.speak(u);
+  return speakTextWithBrowser(text, locale, lang, rate, intentId);
 }
 
 /** Play a word or phrase in the reference voice (with standalone citation intonation for single words). */
 export async function hear(
   text: string,
-  opts: { lang: string; level: LevelId; live: boolean; voiceId?: string; rate?: number },
+  opts: { lang: string; level: LevelId; live: boolean; voiceId?: string; rate?: number; intentId?: number },
 ): Promise<void> {
   const clean = text.trim().replace(/^[,;:\-–—]+|[,;:\-–—]+$/g, "").trim() || text.trim();
   if (!opts.live) {
-    speakWithBrowser(clean, opts.lang, opts.rate ?? 1);
+    await speakWithBrowser(clean, opts.lang, opts.rate ?? 1, opts.intentId);
     return;
   }
   const ref = await loadReference(clean, opts.lang, opts.level, opts.voiceId);
-  await play(ref.url, { rate: opts.rate ?? 1 });
+  await play(ref.url, { rate: opts.rate ?? 1, intentId: opts.intentId });
 }
 
 export const scoreColor = (score: number) =>
-  score >= 80 ? "text-emerald-600" : score >= 60 ? "text-amber-600" : "text-red-600";
+  score >= 86 ? "text-emerald-600" : score >= 65 ? "text-amber-600" : "text-red-600";
 
 const STATUS_STYLE: Record<WordStatus, string> = {
   ok: "hover:bg-secondary",
@@ -158,7 +153,7 @@ function coachTip(result: AssessResult, prosody: ProsodyResult | null, level: Le
   const worst = [...result.words].sort((a, b) => a.score - b.score)[0];
   const skipped = result.words.filter((w) => w.status === "omitted").length;
   if (skipped > result.words.length / 3) {
-    return "A lot of the text was not heard. Check that your microphone is close, then read the whole text at a steady pace.";
+    return "A lot of the text was not heard. Check that your microphone is close, then say the whole sentence at a steady pace.";
   }
   if (worst && worst.status !== "ok") {
     if (worst.diagnosis && worst.fix) {
@@ -181,8 +176,8 @@ function coachTip(result: AssessResult, prosody: ProsodyResult | null, level: Le
     return "Your sounds are clear. Now copy the tune: follow where the reference voice rises and falls in the chart.";
   }
   return level === "advanced"
-    ? "Clean take. Try the next text, switch to Shadowing to lock in native speed, or paste something you have to say this week."
-    : "Every word came through clearly. Move on to the next text, or try a harder level.";
+    ? "Clean take. Try the next sentence, switch to Shadowing to lock in native speed, or paste a line you have to say this week."
+    : "Every word came through clearly. Move on to the next sentence, or try a harder level.";
 }
 
 interface Outcome {
@@ -206,12 +201,14 @@ interface Props {
   phrase?: Phrase;
   /** When given, the learner may replace the text with their own. */
   onTextChange?: (text: string) => void;
+  /** Called when the learner finishes editing, so a long text can be split into short sentences. */
+  onEditDone?: (text: string) => void;
   onResult?: (result: AssessResult, attempt: Attempt) => void;
   /** Shown beside the record button once there is a result, e.g. "Next phrase". */
   after?: React.ReactNode;
 }
 
-export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChange, onResult, after }: Props) {
+export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChange, onEditDone, onResult, after }: Props) {
   const { me, noteAnalysis, promptUpgrade } = useAccount();
   const ent = me.entitlements;
   const language = getLanguage(lang);
@@ -238,6 +235,10 @@ export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChan
   }, [outcome?.userUrl]);
 
   useEffect(() => stopPlayback, []);
+  // Fetch the sound model early so it is ready by the first recording (about 240 MB, once).
+  useEffect(() => {
+    preloadRatingModel().catch(() => undefined);
+  }, []);
 
   const fail = useCallback(
     (err: unknown, fallback: string) => {
@@ -264,16 +265,24 @@ export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChan
         form.append("level", level);
         const refPromise = live ? loadReference(target, lang, level, voiceId).catch(() => null) : Promise.resolve(null);
         const res = await fetch("/api/assess", { method: "POST", body: form });
-        const data = (await res.json()) as AssessResult & { error?: string; upgrade?: UpgradeReason };
+        let data = (await res.json()) as AssessResult & { error?: string; upgrade?: UpgradeReason };
         if (data.upgrade) throw new UpgradeNeeded(data.upgrade);
         if (!res.ok) throw new Error(data.error ?? "Assessment failed.");
         noteAnalysis();
 
         // Do not block the analysis result if reference TTS is still generating on a cold cache.
-        const reference = await Promise.race([
+        let reference = await Promise.race([
           refPromise,
           new Promise<null>((resolve) => setTimeout(() => resolve(null), 200)),
         ]);
+
+        // Main rating: score by deduction, from the sound model running on this device (src/lib/rating.ts).
+        // It runs before the attempt is saved so the stored score is the deduction score.
+        if (live) {
+          reference ??= await Promise.race([refPromise, new Promise<null>((resolve) => setTimeout(() => resolve(null), 15000))]);
+        }
+        const rated = await rateWithDeductions(samples, data, reference, lang);
+        data = { ...rated.result, error: data.error, upgrade: data.upgrade };
 
         // Refine user word timings against the actual 16 kHz waveform energy envelope.
         const refinedUserSpans = refineSpansWithAudio(
@@ -298,9 +307,11 @@ export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChan
           reference && ent.prosody && userPitch
             ? compareProsody(userSpans, reference.spans, userPitch, reference.pitch)
             : null;
+        // Prefer prosody measured on the sound model's word timings (the one the deduction used).
+        const measured = rated.prosody ?? rawProsody;
         const prosody = ent.prosody
-          ? rawProsody && rawProsody.rhythm !== null && rawProsody.intonation !== null
-            ? rawProsody
+          ? measured && measured.rhythm !== null && measured.intonation !== null
+            ? measured
             : fallbackProsody(target, data.words, userPitch, data.duration)
           : null;
         const recorded = recordAttempt(data, prosody, {
@@ -391,37 +402,37 @@ export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChan
    * When `standalone` is true (e.g. tapping a word to learn its pronunciation),
    * plays the word with standalone citation intonation so it never sounds chopped out of a sentence.
    */
-  const listen = async (index?: number, standalone = false) => {
+  const listen = async (index?: number, standalone = false, intentId?: number) => {
     const rate = slow ? 0.75 : 1;
     if (!live) {
-      speakWithBrowser(index === undefined ? target : (tokens[index]?.text ?? ""), lang, rate);
+      await speakWithBrowser(index === undefined ? target : (tokens[index]?.text ?? ""), lang, rate, intentId);
       return;
     }
-    setListening(true);
+    if (intentId === undefined) setListening(true);
     try {
       if (index !== undefined && (standalone || tokens.length === 1)) {
         const wordText = tokens[index]?.text;
         if (!wordText) return;
-        await hear(wordText, { lang, level, live, voiceId, rate });
+        await hear(wordText, { lang, level, live, voiceId, rate, intentId });
         return;
       }
       const ref = await loadReference(target, lang, level, voiceId);
       const span = index === undefined ? null : ref.spans[index];
       if (index !== undefined && !span) {
         const wordText = tokens[index]?.text;
-        if (wordText) await hear(wordText, { lang, level, live, voiceId, rate });
+        if (wordText) await hear(wordText, { lang, level, live, voiceId, rate, intentId });
         return;
       }
       await play(
         ref.url,
         span
-          ? { from: Math.max(0, span.start - 0.015), to: span.end + 0.02, rate }
-          : { rate },
+          ? { from: Math.max(0, span.start - 0.015), to: span.end + 0.02, rate, intentId }
+          : { rate, intentId },
       );
     } catch (err) {
       fail(err, "Could not play the reference.");
     } finally {
-      setListening(false);
+      if (intentId === undefined) setListening(false);
     }
   };
 
@@ -476,7 +487,9 @@ export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChan
   }, []);
 
   const word = shown && selected !== null ? shown.result.words[selected] : null;
-  const disabled = !target || target.length > MAX_TEXT || busy;
+  // One short take at a time: a longer text is split into sentences before it can be recorded.
+  const short = isShort(target, lang);
+  const disabled = !target || !short || busy;
   const canSeeSounds = me.engines.azure || Boolean(me.engines.openai);
 
   return (
@@ -493,7 +506,7 @@ export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChan
                     autoFocus
                     value={text}
                     onChange={(e) => onTextChange(e.target.value)}
-                    placeholder="Type or paste the text you want to read aloud…"
+                    placeholder="Type or paste what you want to say. Longer texts are split into short sentences you practise one at a time…"
                     name="text"
                     aria-label="Text to read aloud"
                     className="min-h-44 resize-none border-0 p-0 text-lg leading-relaxed shadow-none focus-visible:ring-0 md:text-xl dark:bg-transparent"
@@ -523,6 +536,24 @@ export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChan
                 </p>
               )}
               {shown && <Legend />}
+              {shown && word && (
+                <div className="mt-3 rounded-xl border bg-secondary/35 p-3">
+                  <WordCompareControls
+                    word={word}
+                    lang={lang}
+                    showHeader
+                    compact
+                    canPlaySelf={word.start !== undefined && word.end !== undefined}
+                    canPlayTarget
+                    canPlayInSentence={live && shown.result.words.length > 1 && !!shown.reference?.spans[word.index]}
+                    onPlaySelf={(intentId) =>
+                      playWordSlice(shown.userUrl, word, { rate: slow ? 0.75 : 1, intentId })
+                    }
+                    onPlayTarget={(intentId) => listen(word.index, true, intentId)}
+                    onPlayInSentence={(intentId) => listen(word.index, false, intentId)}
+                  />
+                </div>
+              )}
             </div>
 
             <div className="flex flex-wrap items-center gap-2 border-t px-4 py-3">
@@ -541,7 +572,15 @@ export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChan
               </Button>
               {onTextChange &&
                 (editing ? (
-                  <Button variant="ghost" className="rounded-full" onClick={() => setEditing(false)} disabled={!target}>
+                  <Button
+                    variant="ghost"
+                    className="rounded-full"
+                    onClick={() => {
+                      setEditing(false);
+                      onEditDone?.(target);
+                    }}
+                    disabled={!target}
+                  >
                     Done
                   </Button>
                 ) : (
@@ -562,8 +601,10 @@ export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChan
                   </>
                 ) : (
                   editing && (
-                    <span className={cn("text-xs text-muted-foreground", target.length > MAX_TEXT && "text-red-600")}>
-                      {target.length} / {MAX_TEXT}
+                    <span className="text-xs text-muted-foreground">
+                      {short || !target
+                        ? `${wordCount(target, lang)} / ${SHORT.words} words`
+                        : `${splitShort(target, lang).length} short sentences · press Done`}
                     </span>
                   )
                 )}
@@ -658,19 +699,14 @@ export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChan
                 word={word}
                 lang={lang}
                 isMultiWord={shown.result.words.length > 1}
-                canHearReference={live}
+                canHearReference
                 canHearSlice={live && !!shown.reference?.spans[word.index]}
                 soundsLocked={canSeeSounds && !ent.phonemes && !word.phonemes?.length}
                 onUnlockSounds={() => promptUpgrade("phonemes")}
-                onWordAlone={() => void listen(word.index, true)}
-                onInSentence={() => void listen(word.index, false)}
-                onSelf={() =>
-                  word.start !== undefined &&
-                  word.end !== undefined &&
-                  void play(shown.userUrl, {
-                    from: Math.max(0, word.start - 0.02),
-                    to: word.end + 0.025,
-                  })
+                onWordAlone={(intentId) => listen(word.index, true, intentId)}
+                onInSentence={(intentId) => listen(word.index, false, intentId)}
+                onSelf={(intentId) =>
+                  playWordSlice(shown.userUrl, word, { rate: slow ? 0.75 : 1, intentId })
                 }
               />
             )}
@@ -860,7 +896,7 @@ function Legend() {
         </span>
       ))}
       <span className="line-through decoration-red-500">Skipped</span>
-      <span className="ml-auto">Tap any word for detailed diagnosis</span>
+      <span className="ml-auto">Tap any word to compare how you said it vs. how it should sound</span>
     </div>
   );
 }
@@ -914,22 +950,15 @@ function Scores({
   prosodyLocked: boolean;
   onUnlock: () => void;
 }) {
-  const overall = overallScore(
-    {
-      accuracy: result.scores.accuracy,
-      intelligibility: result.scores.intelligibility,
-      fluency: prosody?.fluency ?? null,
-      rhythm: prosody?.rhythm ?? null,
-      intonation: prosody?.intonation ?? null,
-    },
-    level,
-  );
+  const overall = overallFor(result, prosody);
   const pace = prosody?.pace;
   const rows: { label: string; value: number | null; hint: string; paid?: boolean }[] = [
     {
       label: "Sounds",
       value: result.scores.accuracy,
-      hint: result.phonemeLevel ? "How close each individual phoneme is to the target." : "How clearly each word came through.",
+      hint: result.phonemeLevel
+        ? "How close each sound was to a native speaker. This carries most of your score."
+        : "How close each word was to a native speaker. This carries most of your score.",
     },
     {
       label: "Understood",
@@ -945,8 +974,18 @@ function Scores({
           ? "Pace and hesitations."
           : `${prosody?.hesitations ?? 0} hesitation${prosody?.hesitations === 1 ? "" : "s"} · ${pace.toFixed(2)}× reference pace`,
     },
-    { label: "Rhythm", value: prosody?.rhythm ?? null, paid: true, hint: "Which words you stretch and which you shorten." },
-    { label: "Melody", value: prosody?.intonation ?? null, paid: true, hint: "Rise and fall of your pitch." },
+    {
+      label: "Rhythm",
+      value: prosody?.rhythm ?? null,
+      paid: true,
+      hint: "Which words you stretch and which you shorten, compared with one reference voice. A guide, not a verdict.",
+    },
+    {
+      label: "Melody",
+      value: prosody?.intonation ?? null,
+      paid: true,
+      hint: "Rise and fall of your pitch, compared with one reference voice. A guide, not a verdict.",
+    },
   ];
   return (
     <Card>
@@ -955,6 +994,15 @@ function Scores({
           <div>
             <p className="text-sm text-muted-foreground">Overall · {LEVELS[level].name}</p>
             <p className={cn("text-5xl font-semibold tracking-tight tabular-nums", scoreColor(overall))}>{overall}</p>
+            <p className="mt-1 text-sm font-medium" title={bandFor(overall).detail}>
+              {bandFor(overall).label}
+            </p>
+            <p className="text-xs text-muted-foreground">{DEPTH_NOTE[result.depth ?? (result.phonemeLevel ? "sound" : "word")]}</p>
+            {result.deduction ? (
+              <p className="text-xs text-muted-foreground">Rated by deduction: 100 minus every mistake caught.</p>
+            ) : (
+              !result.demo && <p className="text-xs text-muted-foreground">Engine score: the precise rating could not run.</p>
+            )}
             <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
               {xp !== undefined && <span className="rounded-full bg-secondary px-2 py-0.5 font-medium text-foreground">+{xp} points</span>}
               {personalBest && (
@@ -967,6 +1015,7 @@ function Scores({
           </div>
           <Orb palette={paletteForScore(overall)} size={60} float="fast" />
         </div>
+        {result.deduction && <DeductionList result={result} />}
         <div className="space-y-4">
           {rows.map((r) => {
             const locked = r.paid && prosodyLocked;
@@ -1000,6 +1049,50 @@ function Scores({
   );
 }
 
+const KIND_LABEL: Record<Deduction["kind"], string> = {
+  sound: "Sound",
+  word: "Word",
+  pause: "Pause",
+  pace: "Pace",
+  rhythm: "Rhythm",
+  melody: "Melody",
+};
+
+/** What cost points, biggest first: the reasons behind a deduction score. */
+function DeductionList({ result }: { result: AssessResult }) {
+  const items = [...(result.deduction?.items ?? [])].sort((a, b) => b.points - a.points);
+  if (!items.length) return <p className="text-sm text-muted-foreground">No mistakes caught. Nothing was deducted.</p>;
+  const shown = items.slice(0, 8);
+  return (
+    <div>
+      <p className="text-sm font-medium">What cost points</p>
+      <ul className="mt-1.5 space-y-1 text-sm">
+        {shown.map((d, i) => (
+          <li key={i} className="flex items-baseline gap-2">
+            <span className="w-12 shrink-0 text-right font-semibold tabular-nums text-rose-600 dark:text-rose-400">
+              −{d.points.toFixed(1)}
+            </span>
+            <span className="min-w-0">
+              <span className="text-muted-foreground">{KIND_LABEL[d.kind]}</span>
+              {d.word !== undefined && result.words[d.word] ? ` · “${result.words[d.word].text}”` : ""} · {d.detail}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {items.length > shown.length && (
+        <p className="mt-1 text-xs text-muted-foreground">
+          and {items.length - shown.length} smaller deduction{items.length - shown.length > 1 ? "s" : ""} (−
+          {items
+            .slice(shown.length)
+            .reduce((s, d) => s + d.points, 0)
+            .toFixed(1)}
+          )
+        </p>
+      )}
+    </div>
+  );
+}
+
 function WordDetail({
   word,
   lang,
@@ -1019,13 +1112,19 @@ function WordDetail({
   canHearSlice: boolean;
   soundsLocked: boolean;
   onUnlockSounds: () => void;
-  onWordAlone: () => void;
-  onInSentence: () => void;
-  onSelf: () => void;
+  onWordAlone: (intentId?: number) => Promise<void> | void;
+  onInSentence: (intentId?: number) => Promise<void> | void;
+  onSelf: (intentId?: number) => Promise<void> | void;
 }) {
   const [activePhonemeIdx, setActivePhonemeIdx] = useState<number | null>(null);
   const phonemes = useMemo(() => word.phonemes ?? [], [word.phonemes]);
+  // Without a measurement the sounds are the word's expected sounds; their numbers would be invented.
+  const measured = word.phonemesMeasured === true;
   const worstIdx = useMemo(() => {
+    if (!measured) {
+      const heardIdx = phonemes.findIndex((p) => p.heardIpa && p.heardIpa !== p.ipa);
+      return heardIdx >= 0 ? heardIdx : null;
+    }
     let idx = -1;
     let min = 80;
     phonemes.forEach((p, i) => {
@@ -1035,7 +1134,7 @@ function WordDetail({
       }
     });
     return idx >= 0 ? idx : null;
-  }, [phonemes]);
+  }, [phonemes, measured]);
 
   const focusedIdx = activePhonemeIdx !== null && phonemes[activePhonemeIdx] ? activePhonemeIdx : worstIdx;
   const focusedPhoneme = focusedIdx !== null ? phonemes[focusedIdx] : null;
@@ -1074,13 +1173,50 @@ function WordDetail({
           </div>
         </div>
 
+        {word.native && (
+          <div className="space-y-1 rounded-lg border bg-secondary/40 p-2.5 text-xs">
+            <p className="font-medium">Compared with a native reading</p>
+            <p className="font-mono">
+              <span className="text-muted-foreground">native</span> /{word.native.ref}/{" "}
+              <span className="text-muted-foreground">· you</span>{" "}
+              <span className={word.native.issues.length ? "text-red-600 dark:text-red-400" : undefined}>/{word.native.heard}/</span>
+            </p>
+            {word.native.issues.length > 0 ? (
+              <ul className="space-y-0.5">
+                {word.native.issues.slice(0, 3).map((i, k) => (
+                  <li key={k}>
+                    {i.heard ? (
+                      <>
+                        You said <span className="font-mono">/{i.heard}/</span> where a native says{" "}
+                        <span className="font-mono">/{i.ref}/</span>.
+                      </>
+                    ) : (
+                      <>
+                        The native <span className="font-mono">/{i.ref}/</span> was missing.
+                      </>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-muted-foreground">Your sounds matched the native reading.</p>
+            )}
+          </div>
+        )}
+
         {phonemes.length > 0 && (
           <div className="space-y-2">
-            <p className="text-xs font-medium text-muted-foreground">Sound-by-sound breakdown (tap a sound)</p>
+            <p className="text-xs font-medium text-muted-foreground">
+              {measured
+                ? "Sound-by-sound breakdown (tap a sound)"
+                : "Sounds in this word (tap one for how to say it). Scored as a whole word, not sound by sound."}
+            </p>
             <div className="flex flex-wrap gap-1.5">
               {phonemes.map((p, i) => {
                 const isFocused = focusedIdx === i;
-                const isWeak = p.score < 80;
+                const substituted = !!p.heardIpa && p.heardIpa !== p.ipa;
+                const isWeak = measured ? p.score < 80 : substituted;
+                const isBad = measured ? p.score < 60 : substituted;
                 return (
                   <button
                     key={i}
@@ -1089,7 +1225,7 @@ function WordDetail({
                     className={cn(
                       "flex flex-col items-center rounded-lg border px-2.5 py-1.5 text-left transition-colors hover:bg-secondary",
                       isWeak && "border-amber-300 bg-amber-50/60 dark:border-amber-800 dark:bg-amber-950/30",
-                      p.score < 60 && "border-red-300 bg-red-50/70 dark:border-red-800 dark:bg-red-950/40",
+                      isBad && "border-red-300 bg-red-50/70 dark:border-red-800 dark:bg-red-950/40",
                       isFocused && "ring-2 ring-foreground ring-offset-1",
                     )}
                   >
@@ -1099,7 +1235,9 @@ function WordDetail({
                         <span className="text-xs text-red-600 dark:text-red-400">→/{p.heardIpa}/</span>
                       )}
                     </span>
-                    <span className={cn("text-[11px] font-semibold tabular-nums", scoreColor(p.score))}>{p.score}</span>
+                    {measured && (
+                      <span className={cn("text-[11px] font-semibold tabular-nums", scoreColor(p.score))}>{p.score}</span>
+                    )}
                   </button>
                 );
               })}
@@ -1170,41 +1308,19 @@ function WordDetail({
           </button>
         )}
 
-        <div className="flex flex-wrap gap-1.5">
-          <Button
-            variant="outline"
-            size="sm"
-            className="flex-1 rounded-full"
-            onClick={onWordAlone}
-            disabled={!canHearReference}
-            title="Hear this word spoken clearly on its own with standalone dictionary intonation"
-          >
-            <Volume2 />
-            {isMultiWord ? "Word alone" : "Reference"}
-          </Button>
-          {isMultiWord && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="flex-1 rounded-full"
-              onClick={onInSentence}
-              disabled={!canHearSlice}
-              title="Hear this word sliced from the full sentence reading"
-            >
-              <Headphones />
-              In sentence
-            </Button>
-          )}
-          <Button
-            variant="outline"
-            size="sm"
-            className="flex-1 rounded-full"
-            onClick={onSelf}
-            disabled={word.start === undefined}
-          >
-            <User />
-            You
-          </Button>
+        <div className="space-y-1.5">
+          <p className="text-xs font-medium text-muted-foreground">How you said it vs. how it should sound</p>
+          <WordCompareControls
+            word={word}
+            lang={lang}
+            compact
+            canPlaySelf={word.start !== undefined && word.end !== undefined}
+            canPlayTarget={canHearReference}
+            canPlayInSentence={isMultiWord && canHearSlice}
+            onPlaySelf={onSelf}
+            onPlayTarget={onWordAlone}
+            onPlayInSentence={onInSentence}
+          />
         </div>
       </CardContent>
     </Card>
@@ -1300,15 +1416,15 @@ const STEPS: Record<LevelId, [string, string][]> = {
   ],
   intermediate: [
     ["Listen", "Hear a native reading. Slow it down if you need to."],
-    ["Record", "Read the text aloud at your natural pace, up to 30 seconds."],
+    ["Record", "Say the sentence at your natural pace. It takes a few seconds."],
     ["Inspect the diagnosis", "Tap any word to see which phoneme was off, how to position your tongue and lips, and compare audio."],
-    ["Drill or Shadow", "Drill weak words in isolation or switch to Shadowing to train rhythm and melody in real time."],
+    ["Word, then sentence", "Drill each weak word on its own, then put it back into the sentence. Shadowing trains the rhythm."],
   ],
   advanced: [
     ["Listen for the music", "Notice where the voice speeds up, lingers and changes pitch, not only the sounds."],
-    ["Record", "Read at full natural speed. Scoring is strict at this level."],
+    ["Record", "Say it at full natural speed, in one breath."],
     ["Compare rhythm and melody", "Use A → B and Together playback to hear subtle timing and pitch differences."],
-    ["Target your weak spots", "Generate custom passages engineered around your exact weak phonemes and words."],
+    ["Target your weak spots", "Generate a short sentence and drill words built around your exact weak sounds."],
   ],
 };
 

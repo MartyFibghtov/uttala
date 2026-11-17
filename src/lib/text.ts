@@ -16,6 +16,31 @@ export function normalize(word: string, locale?: string): string {
     .replace(/[\p{P}\p{S}\s]/gu, "");
 }
 
+/**
+ * Canonical spelling for words that sound the same but have accepted alternative spellings
+ * (British/American English, German ß/ss). Applied to both sides of a comparison only.
+ */
+function spellingKey(norm: string, lang: string): string {
+  const base = lang.split("-")[0];
+  if (base === "de") return norm.replace(/ß/g, "ss");
+  if (base !== "en") return norm;
+  const fixed: Record<string, string> = { grey: "gray", programme: "program", practise: "practice", practised: "practiced", practises: "practices", practising: "practicing", licence: "license", defence: "defense", offence: "offense", pyjamas: "pajamas", tyre: "tire", kerb: "curb", aluminium: "aluminum", cheque: "check", mum: "mom", okay: "ok" };
+  if (fixed[norm]) return fixed[norm];
+  return norm
+    .replace(/isation(s?)$/, "ization$1")
+    .replace(/is(e|ed|es|er|ers|ing)$/, "iz$1")
+    .replace(/ys(e|ed|es|ing)$/, "yz$1")
+    .replace(/^(\p{L}{3,})our(s|ed|ing|ite|ites|able|er)?$/u, "$1or$2")
+    .replace(/([^aeiou])re(s?)$/, "$1er$2")
+    .replace(/ogue(s?)$/, "og$1")
+    .replace(/([aeiou])ll(ed|ing|er|ers)$/, "$1l$2");
+}
+
+/** True when a recogniser's word is the expected word, allowing accepted alternative spellings. */
+export function sameWord(expected: string, heard: string, lang: string): boolean {
+  return expected === heard || spellingKey(expected, lang) === spellingKey(heard, lang);
+}
+
 /** Fold diacritics and phonetic near-equivalents for softer alignment matching. */
 export function phoneticSkeleton(word: string, locale?: string): string {
   return normalize(word, locale)
@@ -47,14 +72,6 @@ export function tokenize(text: string, locale: string): Token[] {
     tokens.push({ text: s.segment, norm, from: s.index, to: s.index + s.segment.length });
   }
   return tokens;
-}
-
-export function sentenceOf(text: string, offset: number, locale: string): string {
-  const segmenter = new Intl.Segmenter(locale, { granularity: "sentence" });
-  for (const s of segmenter.segment(text)) {
-    if (offset >= s.index && offset < s.index + s.segment.length) return s.segment.trim();
-  }
-  return text.trim();
 }
 
 export function levenshtein(a: string, b: string): number {

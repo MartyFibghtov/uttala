@@ -94,8 +94,8 @@ export function Privacy() {
       <h2>What we collect and why</h2>
       <ul>
         <li>
-          <strong>Account details</strong>: your name, email address and a hashed password, to sign you in and to
-          contact you about your account.
+          <strong>Account details</strong>: your name, email address and sign-in credentials (a hashed password or a
+          linked Google account), to sign you in and to contact you about your account.
         </li>
         <li>
           <strong>Voice recordings</strong>: when you press Record, the audio is sent to our speech-analysis
@@ -125,6 +125,7 @@ export function Privacy() {
         <li>ElevenLabs: speech recognition, alignment and reference voices.</li>
         <li>Microsoft Azure: sound-by-sound scoring, where that feature is active.</li>
         <li>Stripe: payments and invoices.</li>
+        <li>Google: optional sign-in authentication, when you choose “Continue with Google”.</li>
         <li>Our hosting, database and email providers.</li>
       </ul>
       <p>

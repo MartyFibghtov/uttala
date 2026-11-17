@@ -6,6 +6,7 @@ import { useState } from "react";
 import { ArrowRight, CalendarClock, Check, Loader2, Sparkles, Volume2, X } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/app-shell";
+import { ArtworkFrame } from "@/components/artwork";
 import { LanguagePicker, VoicePicker, useVoiceId } from "@/components/pickers";
 import { hear, PracticeSession, scoreColor } from "@/components/practice-session";
 import { Button } from "@/components/ui/button";
@@ -13,9 +14,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { GeneratedTextBanner, requestGeneratedText } from "@/components/weak-spot-generator";
+import { WordLadder } from "@/components/word-ladder";
 import { useAccount } from "@/hooks/use-account";
 import { getLanguage } from "@/lib/languages";
 import { contrastsFor, MINIMAL_PAIRS, type MinimalPair } from "@/lib/minimal-pairs";
+import { isShort, shortContext } from "@/lib/short";
 import { soundForIpa } from "@/lib/sounds";
 import { isDue, listeningKey, recordListening, removeWeak, REVIEW_GAPS, useStore } from "@/lib/store";
 import type { GeneratedText, WeakWord } from "@/lib/types";
@@ -26,7 +29,8 @@ type Tab = (typeof TABS)[number];
 
 function Empty({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border border-dashed px-6 py-12 text-center">
+    <div className="rounded-2xl border border-dashed px-6 py-10 text-center">
+      <ArtworkFrame name="emptyClarity" sizes="176px" className="mx-auto mb-4 aspect-[4/3] w-44 rounded-xl" />
       <p className="font-medium">{title}</p>
       <div className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">{children}</div>
     </div>
@@ -51,13 +55,15 @@ function WordDrills({ lang }: { lang: string }) {
   const [key, setKey] = useState<string | null>(null);
   const [mode, setMode] = useState<"word" | "sentence" | "generated">("word");
   const [tailored, setTailored] = useState<GeneratedText | null>(null);
+  /** Inside a tailored sentence: one of its drill words, said on its own first. */
+  const [tailoredStep, setTailoredStep] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const current = weak.find((w) => w.key === key) ?? due[0] ?? resting[0];
 
   if (!current) {
     return (
       <Empty title="No weak words yet">
-        Record a text in{" "}
+        Record a sentence in{" "}
         <Link href="/practice" className="underline underline-offset-4">
           Practice
         </Link>{" "}
@@ -70,7 +76,11 @@ function WordDrills({ lang }: { lang: string }) {
       </Empty>
     );
   }
-  const hasSentence = current.context !== current.text;
+  // Older entries kept the whole text a word came from; drill it in the short stretch around the word.
+  const context = isShort(current.context, lang)
+    ? current.context
+    : shortContext(current.context, Math.max(0, current.context.indexOf(current.text)), lang);
+  const hasSentence = context !== current.text;
   const at = due.findIndex((w) => w.key === current.key);
   const nextDue = due.length > 1 ? due[(at + 1) % due.length] : null;
   const pick = (w: WeakWord) => {
@@ -94,6 +104,7 @@ function WordDrills({ lang }: { lang: string }) {
         selectedOnly: true,
       });
       setTailored(item);
+      setTailoredStep(null);
       setMode("generated");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not generate a practice sentence.");
@@ -148,7 +159,7 @@ function WordDrills({ lang }: { lang: string }) {
             className="rounded-full"
             onClick={() => setMode("word")}
           >
-            Word alone
+            Word
           </Button>
           <Button
             size="sm"
@@ -167,7 +178,7 @@ function WordDrills({ lang }: { lang: string }) {
             disabled={generating}
           >
             {generating ? <Loader2 className="animate-spin" /> : <Sparkles />}
-            {generating ? "Generating…" : "Tailored text"}
+            {generating ? "Generating…" : "New sentence"}
           </Button>
           <Button
             size="sm"
@@ -186,35 +197,57 @@ function WordDrills({ lang }: { lang: string }) {
           </p>
         )}
         {mode === "generated" && tailored && (
-          <GeneratedTextBanner
-            item={tailored}
-            onRegenerate={() => void generateForDrill(current)}
-            busy={generating}
-          />
+          <>
+            <GeneratedTextBanner
+              item={tailored}
+              onRegenerate={() => void generateForDrill(current)}
+              busy={generating}
+            />
+            <WordLadder
+              lang={lang}
+              words={(tailored.words ?? []).filter((w) => w !== tailored.text)}
+              sentence={tailored.text}
+              current={tailoredStep ?? tailored.text}
+              onPick={(t) => setTailoredStep(t === tailored.text ? null : t)}
+            />
+          </>
         )}
         <PracticeSession
           lang={lang}
           level={level}
           text={
             mode === "generated" && tailored
-              ? tailored.text
+              ? (tailoredStep ?? tailored.text)
               : mode === "sentence" && hasSentence
-                ? current.context
+                ? context
                 : current.text
           }
           phrase={
-            mode === "generated" && tailored
+            mode === "generated" && tailored && !tailoredStep
               ? { text: tailored.text, meaning: tailored.meaning, roman: tailored.roman }
               : undefined
           }
           voiceId={voiceId}
           after={
-            nextDue && (
-              <Button variant="outline" className="rounded-full" onClick={() => pick(nextDue)}>
-                Next word
-                <ArrowRight />
-              </Button>
-            )
+            <>
+              {mode === "word" && (
+                <Button
+                  variant="outline"
+                  className="rounded-full"
+                  onClick={() => (hasSentence ? setMode("sentence") : void generateForDrill(current))}
+                  disabled={generating}
+                >
+                  Now in a sentence
+                  <ArrowRight />
+                </Button>
+              )}
+              {nextDue && (
+                <Button variant="outline" className="rounded-full" onClick={() => pick(nextDue)}>
+                  Next word
+                  <ArrowRight />
+                </Button>
+              )}
+            </>
           }
         />
         {cap !== null && me.billing && (
@@ -275,7 +308,7 @@ function Sounds({ lang }: { lang: string }) {
   if (!phonemes.length) {
     return (
       <Empty title="No sound-level data yet">
-        Record a few texts in Practice and your weakest sounds will show up here.
+        Record a few sentences in Practice and your weakest sounds will show up here.
         {library}
       </Empty>
     );
@@ -300,7 +333,8 @@ function Sounds({ lang }: { lang: string }) {
         selectedOnly: true,
       });
       setTailoredSoundText(item);
-      setSelectedSoundWord(item.text);
+      // Words first, then the sentence.
+      setSelectedSoundWord(item.words?.find((w) => w !== item.text) ?? item.text);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not generate a practice sentence.");
     } finally {
@@ -377,16 +411,26 @@ function Sounds({ lang }: { lang: string }) {
 
       {selectedSoundWord && (
         <div className="space-y-3">
-          {tailoredSoundText && tailoredSoundText.text === selectedSoundWord && (
-            <GeneratedTextBanner
-              item={tailoredSoundText}
-              onRegenerate={() => {
-                const target = tailoredSoundText.targets[0]?.replaceAll("/", "") ?? phonemes[0]?.ipa ?? "";
-                if (target) void generateForSound(target, []);
-              }}
-              busy={generatingIpa !== null}
-            />
-          )}
+          {tailoredSoundText &&
+            (tailoredSoundText.text === selectedSoundWord || tailoredSoundText.words?.includes(selectedSoundWord)) && (
+              <>
+                <GeneratedTextBanner
+                  item={tailoredSoundText}
+                  onRegenerate={() => {
+                    const target = tailoredSoundText.targets[0]?.replaceAll("/", "") ?? phonemes[0]?.ipa ?? "";
+                    if (target) void generateForSound(target, []);
+                  }}
+                  busy={generatingIpa !== null}
+                />
+                <WordLadder
+                  lang={lang}
+                  words={(tailoredSoundText.words ?? []).filter((w) => w !== tailoredSoundText.text)}
+                  sentence={tailoredSoundText.text}
+                  current={selectedSoundWord}
+                  onPick={setSelectedSoundWord}
+                />
+              </>
+            )}
           <PracticeSession
             lang={lang}
             level={level}

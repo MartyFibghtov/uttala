@@ -517,14 +517,20 @@ export function enrichWordDiagnostics(
           word.errorCategory ??= dist <= 2 ? "Single-sound confusion" : "Word mispronunciation";
           word.diagnosis = `Recogniser heard “${word.heard}” instead of “${word.text}”${worstPhoneme ? `, with the main mismatch on /${worstPhoneme.ipa}/` : ""}.${matchedGuide ? ` ${matchedGuide.watch}` : ""}`;
         }
+      } else if (worstPhoneme && !word.phonemesMeasured) {
+        // No per-sound measurement for this word: name the likeliest trouble spot without inventing a score.
+        word.errorCategory ??= matchedGuide ? `Check ${matchedGuide.name.toLowerCase()} (/${worstPhoneme.ipa}/)` : "Not yet a native match";
+        word.diagnosis = matchedGuide
+          ? `“${word.text}” scored ${word.score}. The likeliest cause is the ${matchedGuide.name.toLowerCase()} /${worstPhoneme.ipa}/, a common difficulty in this language. ${matchedGuide.watch}`
+          : `“${word.text}” scored ${word.score}: recognisable, but not yet a native match.`;
       } else if (worstPhoneme) {
         word.errorCategory ??= matchedGuide ? `${matchedGuide.name} (/${worstPhoneme.ipa}/)` : `Unclear /${worstPhoneme.ipa}/`;
         word.diagnosis = matchedGuide
           ? `The ${matchedGuide.name.toLowerCase()} /${worstPhoneme.ipa}/ in “${word.text}” was indistinct (${worstPhoneme.score}/100). ${matchedGuide.watch}`
           : `The sound /${worstPhoneme.ipa}/ in “${word.text}” lacked clarity (${worstPhoneme.score}/100).`;
       } else {
-        word.errorCategory ??= "Unclear articulation";
-        word.diagnosis = `“${word.text}” was understood, but the vowel and consonant transitions were slightly blurred or rushed.`;
+        word.errorCategory ??= "Not yet a native match";
+        word.diagnosis = `“${word.text}” scored ${word.score}: recognisable, but not yet a native match. Compare it with the reference.`;
       }
     }
 

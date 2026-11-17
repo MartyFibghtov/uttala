@@ -1,3 +1,4 @@
+import type { Deduction } from "./deductions";
 import type { LevelId } from "./levels";
 import type { Entitlements, Interval, PlanId } from "./plans";
 
@@ -40,7 +41,20 @@ export interface WordResult {
   start?: number;
   end?: number;
   phonemes?: PhonemeResult[];
+  /**
+   * True when the per-sound scores were measured from the audio. When false or absent, the sounds are
+   * the word's expected sounds with no scores of their own, and the interface must not present numbers for them.
+   */
+  phonemesMeasured?: boolean;
+  /**
+   * The on-device comparison with a native reading of the same text, when the precise sound check ran.
+   * `match` is 0–100; each issue is a native sound the learner replaced (`heard`) or left out (null).
+   */
+  native?: { match: number; ref: string; heard: string; issues: { ref: string; heard: string | null }[] };
 }
+
+/** How closely a recording was checked: each sound, each word, or only alignment and recognition. */
+export type CheckDepth = "sound" | "word" | "basic";
 
 export interface Engines {
   elevenlabs: boolean;
@@ -59,8 +73,9 @@ export interface FocusSound {
 export interface AssessResult {
   engines: Engines;
   demo: boolean;
-  /** True when phoneme-level scores are present. */
+  /** True when measured phoneme-level scores are present. */
   phonemeLevel: boolean;
+  depth?: CheckDepth;
   transcript: string;
   words: WordResult[];
   insertions: string[];
@@ -75,6 +90,11 @@ export interface AssessResult {
   overallFeedback?: string;
   /** Key sounds identified in this recording that need attention. */
   focusSounds?: FocusSound[];
+  /**
+   * Score by deduction (src/lib/rating.ts): 100 minus every caught mistake. When present it is the
+   * recording's overall score; absent when the on-device sound model could not run.
+   */
+  deduction?: { score: number; items: Deduction[] };
 }
 
 export interface TimedChar {
@@ -214,6 +234,8 @@ export interface GeneratedText {
   focus: string;
   /** Specific weak words, sounds or contrasts woven into the text. */
   targets: string[];
+  /** Single words carrying the same sounds, drilled one at a time before the sentence. */
+  words?: string[];
   at: number;
 }
 

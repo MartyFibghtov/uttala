@@ -222,7 +222,27 @@ export function pitchAt(track: PitchTrack, time: number): number | null {
 
 let active: HTMLAudioElement | null = null;
 let activeStop: (() => void) | null = null;
+let currentIntentId = 0;
 const decodedCache = new Map<string, AudioBuffer>();
+
+/** Claim a playback intent token and stop any currently playing audio. */
+export function beginAudioIntent(): number {
+  stopCurrentAudio();
+  return ++currentIntentId;
+}
+
+export function isAudioIntentCurrent(id: number): boolean {
+  return id === currentIntentId;
+}
+
+function claimOrValidateIntent(intentId?: number): boolean {
+  stopCurrentAudio();
+  if (intentId === undefined) {
+    currentIntentId++;
+    return true;
+  }
+  return intentId === currentIntentId;
+}
 
 async function getDecodedBuffer(ctx: AudioContext, url: string): Promise<AudioBuffer> {
   const cached = decodedCache.get(url);
@@ -242,6 +262,8 @@ export interface PlayOptions {
   from?: number;
   to?: number;
   rate?: number;
+  /** Optional intent token from `beginAudioIntent()` for multi-step comparisons. */
+  intentId?: number;
   /** Called on each animation frame with the current playback position in seconds. */
   onProgress?: (currentTime: number, duration: number) => void;
 }
@@ -252,7 +274,8 @@ export interface PlayOptions {
  * never overshoot into neighbouring words, and HTMLAudioElement with preservesPitch for full readings.
  */
 export function play(url: string, opts: PlayOptions = {}): Promise<void> {
-  stopPlayback();
+  if (!claimOrValidateIntent(opts.intentId)) return Promise.resolve();
+  const intentSnapshot = opts.intentId ?? currentIntentId;
   const rate = opts.rate ?? 1;
 
   // Use sample-accurate Web Audio API when playing a slice so word boundaries are exact to <1ms.
@@ -280,7 +303,10 @@ export function play(url: string, opts: PlayOptions = {}): Promise<void> {
 
       void getDecodedBuffer(ctx, url)
         .then((buffer) => {
-          if (stopped) return;
+          if (stopped || intentSnapshot !== currentIntentId) {
+            finish();
+            return;
+          }
           const start = Math.max(0, Math.min(buffer.duration, opts.from ?? 0));
           const end = Math.max(start + 0.02, Math.min(buffer.duration, opts.to ?? buffer.duration));
           const duration = end - start;
@@ -432,7 +458,7 @@ export function playOverlay(refUrl: string, userUrl: string, rate = 1): Promise<
   });
 }
 
-export function stopPlayback() {
+function stopCurrentAudio() {
   if (activeStop) {
     const fn = activeStop;
     activeStop = null;
@@ -441,4 +467,70 @@ export function stopPlayback() {
   active?.pause();
   active = null;
   if (typeof window !== "undefined") window.speechSynthesis?.cancel();
+}
+
+export function stopPlayback() {
+  currentIntentId++;
+  stopCurrentAudio();
+}
+
+/** Play a single word's sliced span from a recording URL with gentle onset/release padding. */
+export function playWordSlice(
+  url: string,
+  span: { start?: number; end?: number },
+  opts: { rate?: number; intentId?: number } = {},
+): Promise<void> {
+  if (span.start === undefined || span.end === undefined) return Promise.resolve();
+  return play(url, {
+    from: Math.max(0, span.start - 0.02),
+    to: span.end + 0.025,
+    rate: opts.rate,
+    intentId: opts.intentId,
+  });
+}
+
+/** Play text with the browser's built-in speech synthesis, resolving when speech ends or is cancelled. */
+export function speakTextWithBrowser(
+  text: string,
+  locale: string,
+  lang: string,
+  rate = 1,
+  intentId?: number,
+): Promise<void> {
+  if (typeof window === "undefined" || !("speechSynthesis" in window)) return Promise.resolve();
+  if (!claimOrValidateIntent(intentId)) return Promise.resolve();
+
+  return new Promise((resolve) => {
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = locale;
+    u.rate = rate;
+    const voices = window.speechSynthesis.getVoices?.() ?? [];
+    const normLocale = locale.toLowerCase();
+    const normLang = lang.toLowerCase();
+    const nativeVoice =
+      voices.find((v) => v.lang.toLowerCase() === normLocale && v.localService) ??
+      voices.find((v) => v.lang.toLowerCase() === normLocale) ??
+      voices.find((v) => v.lang.toLowerCase().startsWith(`${normLang}-`) && v.localService) ??
+      voices.find((v) => v.lang.toLowerCase().startsWith(`${normLang}-`) || v.lang.toLowerCase() === normLang);
+    if (nativeVoice) u.voice = nativeVoice;
+
+    let done = false;
+    let fallback: ReturnType<typeof setTimeout> | null = null;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      if (fallback) clearTimeout(fallback);
+      if (activeStop === abort) activeStop = null;
+      resolve();
+    };
+    const abort = () => {
+      window.speechSynthesis.cancel();
+      finish();
+    };
+    activeStop = abort;
+    u.onend = finish;
+    u.onerror = finish;
+    fallback = setTimeout(finish, Math.max(2500, text.length * 140 + 1500));
+    window.speechSynthesis.speak(u);
+  });
 }

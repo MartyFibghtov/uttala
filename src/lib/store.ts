@@ -2,9 +2,10 @@
 
 import { useSyncExternalStore } from "react";
 import { DEFAULT_GOAL, EMPTY_DAY, XP, dayKey, type DayLog, type Days } from "./gamification";
-import { LEVELS, type LevelId } from "./levels";
+import { type LevelId, SCORE_SCALE } from "./levels";
 import { overallScore } from "./prosody";
-import { normalize, sentenceOf } from "./text";
+import { shortContext } from "./short";
+import { normalize } from "./text";
 import type {
   AssessResult,
   Attempt,
@@ -26,6 +27,8 @@ export interface Prefs {
 export interface Settings {
   /** Daily goal in points. */
   goal: number;
+  /** Run the precise sound check on this device after each recording. */
+  soundCheck?: boolean;
 }
 
 interface Shape {
@@ -81,13 +84,13 @@ const SYNCED = [
 ] as const;
 type SyncedKey = (typeof SYNCED)[number];
 
-let prefix = "uttala.anon.";
+let prefix = "sayclear.anon.";
 const cache = new Map<string, unknown>();
 const listeners = new Set<() => void>();
 
 /** Scope everything to one account, so two people sharing a browser never see each other's data. */
 export function setStoreUser(userId: string) {
-  const next = `uttala.${userId}.`;
+  const next = `sayclear.${userId}.`;
   if (next === prefix) return;
   prefix = next;
   cache.clear();
@@ -330,10 +333,10 @@ export function recordAttempt(
     rhythm: prosody?.rhythm ?? null,
     intonation: prosody?.intonation ?? null,
   };
-  const overall = overallScore(parts, level);
+  const overall = result.deduction?.score ?? overallScore(parts);
   const mastered: MasteredWord[] = [];
 
-  const clear = LEVELS[level].clear;
+  const clear = SCORE_SCALE.clear;
   const all = read("weak");
   const weak = new Map(all.filter((w) => w.lang === lang).map((w) => [w.key, w]));
   for (const w of result.words) {
@@ -347,7 +350,7 @@ export function recordAttempt(
         key,
         lang,
         text: w.text,
-        context: prev && result.words.length === 1 ? prev.context : sentenceOf(text, w.from, lang),
+        context: prev && result.words.length === 1 ? prev.context : shortContext(text, w.from, lang),
         attempts: (prev?.attempts ?? 0) + 1,
         avg: prev ? Math.round(prev.avg * 0.6 + w.score * 0.4) : w.score,
         last: w.score,
@@ -409,6 +412,8 @@ export function recordAttempt(
   if (opts.phonemes && result.phonemeLevel) {
     const phonemes = new Map(read("phonemes").map((p) => [p.key, p]));
     for (const w of result.words) {
+      // Only sounds that were measured feed the sound statistics; estimated ones would skew them.
+      if (!w.phonemesMeasured) continue;
       for (const p of w.phonemes ?? []) {
         const key = `${lang}:${p.ipa}`;
         const prev = phonemes.get(key) ?? { key, lang, ipa: p.ipa, count: 0, avg: 0, examples: [] };

@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { SHORT } from "@/lib/short";
 
-export const MAX_RECORDING_SECONDS = 30;
+export const MAX_RECORDING_SECONDS = SHORT.seconds;
 
 interface Session {
   stream: MediaStream;

@@ -1,5 +1,5 @@
 // Creates (or updates) the Stripe products, prices, billing portal settings and,
-// optionally, the webhook endpoint that Uttala needs. Safe to run repeatedly.
+// optionally, the webhook endpoint that SayClear needs. Safe to run repeatedly.
 //
 //   pnpm stripe:setup                                  products, prices, portal
 //   pnpm stripe:setup --webhook https://your.site      also registers the webhook
@@ -30,17 +30,17 @@ console.log(`Stripe ${live ? "LIVE" : "test"} mode\n`);
 
 const PLANS = [
   {
-    id: "uttala_plus",
+    id: "sayclear_plus",
     plan: "plus",
-    name: "Uttala Plus",
+    name: "SayClear Plus",
     description: "60 analysed recordings a day, your own texts, rhythm and melody feedback, choice of voices.",
     month: 999,
     year: 7999,
   },
   {
-    id: "uttala_pro",
+    id: "sayclear_pro",
     plan: "pro",
-    name: "Uttala Pro",
+    name: "SayClear Pro",
     description: "Everything in Plus, sound-by-sound scoring and 250 analysed recordings a day.",
     month: 1999,
     year: 14999,
@@ -76,7 +76,7 @@ async function ensureProduct(p) {
 }
 
 async function ensurePrice(p, interval) {
-  const lookup = `uttala_${p.plan}_${interval}ly`;
+  const lookup = `sayclear_${p.plan}_${interval}ly`;
   const amount = p[interval];
   const existing = (await stripe.prices.list({ lookup_keys: [lookup], active: true, limit: 1 })).data[0];
   if (existing && existing.unit_amount === amount && existing.recurring?.interval === interval) {
@@ -106,7 +106,7 @@ for (const p of PLANS) {
 
 // Let subscribers switch plan, update their card and cancel by themselves.
 const portalSettings = {
-  business_profile: { headline: "Manage your Uttala subscription" },
+  business_profile: { headline: "Manage your SayClear subscription" },
   features: {
     customer_update: { enabled: true, allowed_updates: ["email", "address", "name"] },
     invoice_history: { enabled: true },
@@ -121,10 +121,10 @@ const portalSettings = {
   },
 };
 const portals = await stripe.billingPortal.configurations.list({ limit: 100 });
-const mine = portals.data.find((c) => c.metadata?.app === "uttala");
+const mine = portals.data.find((c) => c.metadata?.app === "sayclear" || c.metadata?.app === "uttala");
 const portal = mine
   ? await stripe.billingPortal.configurations.update(mine.id, portalSettings)
-  : await stripe.billingPortal.configurations.create({ ...portalSettings, metadata: { app: "uttala" } });
+  : await stripe.billingPortal.configurations.create({ ...portalSettings, metadata: { app: "sayclear" } });
 console.log(`billing portal: ${mine ? "updated" : "created"} (${portal.id})`);
 
 const flag = process.argv.indexOf("--webhook");
@@ -132,7 +132,7 @@ let webhookSecret = null;
 if (flag > -1) {
   const base = process.argv[flag + 1];
   if (!base?.startsWith("https://")) {
-    console.error("\n--webhook needs your site's https:// address, e.g. --webhook https://uttala.example");
+    console.error("\n--webhook needs your site's https:// address, e.g. --webhook https://sayclear.example");
     process.exit(1);
   }
   const url = `${base.replace(/\/$/, "")}/api/stripe/webhook`;

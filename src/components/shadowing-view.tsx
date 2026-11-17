@@ -20,10 +20,12 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/app-shell";
+import { ArtworkFrame } from "@/components/artwork";
 import { LiveBars } from "@/components/live-bars";
 import { Orb, paletteForScore } from "@/components/orb";
 import { LanguagePicker, LevelPicker, VoicePicker, useVoiceId } from "@/components/pickers";
 import { buildReferenceContour, PitchChart } from "@/components/pitch-chart";
+import { WordCompareControls } from "@/components/word-compare";
 import {
   hear,
   loadReference,
@@ -44,6 +46,7 @@ import {
   encodeWav,
   play,
   playOverlay,
+  playWordSlice,
   refineSpansWithAudio,
   SAMPLE_RATE,
   stopPlayback,
@@ -51,7 +54,8 @@ import {
 } from "@/lib/audio";
 import { findPhrase, getLanguage, textsFor, type Phrase } from "@/lib/languages";
 import { type LevelId } from "@/lib/levels";
-import { compareProsody, overallScore } from "@/lib/prosody";
+import { compareProsody, overallFor } from "@/lib/prosody";
+import { preloadRatingModel, rateWithDeductions } from "@/lib/rating";
 import { recordAttempt, useStore } from "@/lib/store";
 import { tokenize, type Span } from "@/lib/text";
 import type { AssessResult, Attempt, GeneratedText, ProsodyResult } from "@/lib/types";
@@ -89,7 +93,7 @@ function splitSentences(text: string, lang: string): string[] {
 }
 
 /** Calculate a composite Shadowing Synchrony score weighting rhythm, pace, melody, fluency and sound clarity. */
-function computeSynchrony(result: AssessResult, prosody: ProsodyResult | null, level: LevelId): number {
+function computeSynchrony(result: AssessResult, prosody: ProsodyResult | null): number {
   if (!prosody) return result.scores.accuracy;
   const paceScore =
     prosody.pace === null
@@ -100,13 +104,7 @@ function computeSynchrony(result: AssessResult, prosody: ProsodyResult | null, l
   const fluency = prosody.fluency ?? 80;
   const sounds = result.scores.accuracy;
   const raw = rhythm * 0.28 + paceScore * 0.22 + melody * 0.2 + fluency * 0.12 + sounds * 0.18;
-  return Math.max(0, Math.min(100, Math.round((raw + overallScore({
-    accuracy: result.scores.accuracy,
-    intelligibility: result.scores.intelligibility,
-    fluency: prosody.fluency,
-    rhythm: prosody.rhythm,
-    intonation: prosody.intonation,
-  }, level)) / 2)));
+  return Math.max(0, Math.min(100, Math.round((raw + overallFor(result, prosody)) / 2)));
 }
 
 export function ShadowingSession({
@@ -195,6 +193,11 @@ export function ShadowingSession({
     [promptUpgrade],
   );
 
+  // Fetch the sound model early so it is ready by the first recording (about 240 MB, once).
+  useEffect(() => {
+    preloadRatingModel().catch(() => undefined);
+  }, []);
+
   const analyse = useCallback(
     async (blob: Blob) => {
       setPhase("analysing");
@@ -216,10 +219,13 @@ export function ShadowingSession({
           fetch("/api/assess", { method: "POST", body: form }),
           live ? loadReference(activeText, lang, level, voiceId).catch(() => null) : Promise.resolve(null),
         ]);
-        const data = (await res.json()) as AssessResult & { error?: string; upgrade?: UpgradeReason };
-        if (data.upgrade) throw new UpgradeNeeded(data.upgrade);
-        if (!res.ok) throw new Error(data.error ?? "Shadowing analysis failed.");
+        const engine = (await res.json()) as AssessResult & { error?: string; upgrade?: UpgradeReason };
+        if (engine.upgrade) throw new UpgradeNeeded(engine.upgrade);
+        if (!res.ok) throw new Error(engine.error ?? "Shadowing analysis failed.");
         noteAnalysis();
+        // Main rating: score by deduction from the on-device sound model (src/lib/rating.ts).
+        const rated = await rateWithDeductions(samples, engine, ref, lang);
+        const data = rated.result;
 
         const refinedUserSpans = refineSpansWithAudio(
           samples,
@@ -235,7 +241,7 @@ export function ShadowingSession({
           }
         });
 
-        const prosody = ref
+        const prosody = rated.prosody ?? (ref
           ? compareProsody(
               data.words.map((w) =>
                 w.start !== undefined && w.end !== undefined ? { start: w.start, end: w.end } : null,
@@ -244,7 +250,7 @@ export function ShadowingSession({
               trackPitch(samples),
               ref.pitch,
             )
-          : null;
+          : null);
 
         const recorded = recordAttempt(data, prosody, {
           lang,
@@ -254,7 +260,7 @@ export function ShadowingSession({
           phonemes: ent.phonemes,
         });
 
-        const synchrony = computeSynchrony(data, prosody, level);
+        const synchrony = computeSynchrony(data, prosody);
         const worst = [...data.words].sort((a, b) => a.score - b.score)[0];
         setSelectedWord(worst ? worst.index : 0);
         setOutcome({
@@ -546,7 +552,7 @@ export function ShadowingSession({
               chunkIdx === "all" && "border-foreground bg-foreground text-background",
             )}
           >
-            Full passage ({sentences.length} sentences)
+            All {sentences.length} sentences
           </button>
           {sentences.map((s, idx) => (
             <button
@@ -593,11 +599,49 @@ export function ShadowingSession({
                     selectedWord={selectedWord}
                     onTapWord={(i) => {
                       setSelectedWord(i);
-                      const wordText = tokens[i]?.text;
-                      if (wordText) void hear(wordText, { lang, level, live, voiceId, rate });
+                      if (!shown) {
+                        const wordText = tokens[i]?.text;
+                        if (wordText) void hear(wordText, { lang, level, live, voiceId, rate });
+                      }
                     }}
                   />
                 </div>
+
+                {shown && (() => {
+                  const activeWord =
+                    selectedWord !== null ? shown.result.words[selectedWord] : shown.result.words[0];
+                  if (!activeWord) return null;
+                  const refSpan = shown.reference?.spans[activeWord.index];
+                  return (
+                    <div className="mt-4 rounded-xl border bg-secondary/35 p-3">
+                      <WordCompareControls
+                        word={activeWord}
+                        lang={lang}
+                        showHeader
+                        compact
+                        canPlaySelf={activeWord.start !== undefined && activeWord.end !== undefined}
+                        canPlayTarget
+                        canPlayInSentence={Boolean(live && shown.reference && refSpan)}
+                        onPlaySelf={(intentId) =>
+                          playWordSlice(shown.userUrl, activeWord, { rate, intentId })
+                        }
+                        onPlayTarget={(intentId) =>
+                          hear(activeWord.text, { lang, level, live, voiceId, rate, intentId })
+                        }
+                        onPlayInSentence={(intentId) =>
+                          shown.reference && refSpan
+                            ? play(shown.reference.url, {
+                                from: Math.max(0, refSpan.start - 0.015),
+                                to: refSpan.end + 0.02,
+                                rate,
+                                intentId,
+                              })
+                            : Promise.resolve()
+                        }
+                      />
+                    </div>
+                  );
+                })()}
 
                 {blind && (
                   <div className="mt-3 flex items-center justify-between rounded-lg border border-dashed px-3 py-2 text-xs text-muted-foreground">
@@ -766,17 +810,26 @@ export function ShadowingSession({
           {shown ? (
             <ShadowingFeedback
               outcome={shown}
+              lang={lang}
               selectedWord={selectedWord}
               onSelectWord={setSelectedWord}
-              onPlayWordRef={(i) => {
+              onPlayWordRef={(i, intentId) => {
                 const w = shown.result.words[i];
-                if (w) void hear(w.text, { lang, level, live, voiceId, rate });
+                return w ? hear(w.text, { lang, level, live, voiceId, rate, intentId }) : Promise.resolve();
               }}
-              onPlayWordSelf={(i) => {
+              onPlayWordInSentence={(i, intentId) => {
+                const refSpan = shown.reference?.spans[i];
+                if (!shown.reference || !refSpan) return Promise.resolve();
+                return play(shown.reference.url, {
+                  from: Math.max(0, refSpan.start - 0.015),
+                  to: refSpan.end + 0.02,
+                  rate,
+                  intentId,
+                });
+              }}
+              onPlayWordSelf={(i, intentId) => {
                 const w = shown.result.words[i];
-                if (w && w.start !== undefined && w.end !== undefined) {
-                  void play(shown.userUrl, { from: Math.max(0, w.start - 0.02), to: w.end + 0.025 });
-                }
+                return w ? playWordSlice(shown.userUrl, w, { rate, intentId }) : Promise.resolve();
               }}
             />
           ) : (
@@ -855,16 +908,20 @@ function KaraokeText({
 
 function ShadowingFeedback({
   outcome,
+  lang,
   selectedWord,
   onSelectWord,
   onPlayWordRef,
+  onPlayWordInSentence,
   onPlayWordSelf,
 }: {
   outcome: ShadowOutcome;
+  lang: string;
   selectedWord: number | null;
   onSelectWord: (i: number) => void;
-  onPlayWordRef: (i: number) => void;
-  onPlayWordSelf: (i: number) => void;
+  onPlayWordRef: (i: number, intentId?: number) => Promise<void>;
+  onPlayWordInSentence: (i: number, intentId?: number) => Promise<void>;
+  onPlayWordSelf: (i: number, intentId?: number) => Promise<void>;
 }) {
   const { result, prosody, synchrony, reference } = outcome;
   const pace = prosody?.pace;
@@ -975,29 +1032,17 @@ function ShadowingFeedback({
                 {word.fix}
               </p>
             )}
-            <div className="flex gap-2 pt-1">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="flex-1 rounded-full"
-                onClick={() => onPlayWordRef(word.index)}
-              >
-                <Volume2 />
-                Model word
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="flex-1 rounded-full"
-                onClick={() => onPlayWordSelf(word.index)}
-                disabled={word.start === undefined}
-              >
-                <Mic />
-                Your word
-              </Button>
-            </div>
+            <WordCompareControls
+              word={word}
+              lang={lang}
+              compact
+              canPlaySelf={word.start !== undefined && word.end !== undefined}
+              canPlayTarget
+              canPlayInSentence={Boolean(reference && refSpan)}
+              onPlaySelf={(intentId) => onPlayWordSelf(word.index, intentId)}
+              onPlayTarget={(intentId) => onPlayWordRef(word.index, intentId)}
+              onPlayInSentence={(intentId) => onPlayWordInSentence(word.index, intentId)}
+            />
           </CardContent>
         </Card>
       )}
@@ -1049,6 +1094,11 @@ function ShadowingGuide({
         </p>
       </CardHeader>
       <CardContent className="space-y-4 text-sm">
+        <ArtworkFrame
+          name="shadowingStudio"
+          sizes="(max-width: 768px) 100vw, 480px"
+          className="aspect-video w-full rounded-xl"
+        />
         <div className="space-y-3">
           <div className="flex gap-2.5">
             <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-secondary text-xs font-semibold">
@@ -1147,7 +1197,7 @@ export function ShadowingView() {
         <WeakSpotGenerator lang={lang} level={level} onGenerated={(item) => setText(item.text, item)} />
         <Button variant="outline" className="rounded-full" onClick={nextText}>
           <Shuffle />
-          Next passage
+          Next sentence
         </Button>
       </PageHeader>
 

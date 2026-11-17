@@ -162,7 +162,7 @@ export async function requestGeneratedText(opts: GenerateRequestOptions): Promis
     body: JSON.stringify(opts),
   });
   const data = (await res.json()) as GeneratedText & { error?: string };
-  if (!res.ok) throw new Error(data.error ?? "Could not generate a practice text.");
+  if (!res.ok) throw new Error(data.error ?? "Could not generate a practice sentence.");
   addGeneratedText(data);
   return data;
 }
@@ -272,9 +272,9 @@ export function WeakSpotGenerator({
     try {
       const item = await requestGeneratedText(defaultGeneratePayload(lang, level, profile));
       onGenerated(item);
-      toast.success("Generated a practice text for your weak spots.");
+      toast.success("Generated a short sentence for your weak spots.");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not generate a practice text.");
+      toast.error(err instanceof Error ? err.message : "Could not generate a practice sentence.");
     } finally {
       setBusy(false);
     }
@@ -330,9 +330,9 @@ export function WeakSpotGenerator({
       });
       onGenerated(item);
       setOpen(false);
-      toast.success("Generated a tailored practice text.");
+      toast.success("Generated a tailored sentence.");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not generate a practice text.");
+      toast.error(err instanceof Error ? err.message : "Could not generate a practice sentence.");
     } finally {
       setBusy(false);
     }
@@ -373,7 +373,7 @@ export function WeakSpotGenerator({
         disabled={busy}
       >
         {busy ? <Loader2 className="animate-spin" /> : <Sparkles />}
-        {busy ? "Generating…" : "Weak-spot text"}
+        {busy ? "Generating…" : "Weak-spot sentence"}
       </Button>
 
       <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -383,7 +383,7 @@ export function WeakSpotGenerator({
             variant="outline"
             size="icon"
             className="rounded-full"
-            aria-label="Choose specific weak spots for text generation"
+            aria-label="Choose specific weak spots for the sentence"
           >
             <SlidersHorizontal className="size-4" />
           </Button>
@@ -393,8 +393,8 @@ export function WeakSpotGenerator({
             <DialogTitle>Generate for your {language.name} weak spots</DialogTitle>
             <DialogDescription>
               {profile.hasTrackedWeakSpots
-                ? "Your weakest words, sounds and ear contrasts are pre-selected below. Adjust them or add a topic to generate a custom reading."
-                : `Pick the ${language.name} sounds, contrasts or words you want to work on, and we will write a practice text that packs them in.`}
+                ? "Your weakest words, sounds and ear contrasts are pre-selected below. Adjust them or add a topic, and we will write one short sentence and a few drill words around them."
+                : `Pick the ${language.name} sounds, contrasts or words you want to work on, and we will write one short sentence and a few drill words that pack them in.`}
             </DialogDescription>
           </DialogHeader>
 
@@ -440,7 +440,7 @@ export function WeakSpotGenerator({
             {selectableSounds.length > 0 && (
               <fieldset className="space-y-2">
                 <legend className="text-xs font-medium text-muted-foreground">
-                  Sounds & phonemes to pack into the text ({activeSounds.length} selected)
+                  Sounds & phonemes to pack into the sentence ({activeSounds.length} selected)
                 </legend>
                 <div className="flex flex-wrap gap-1.5">
                   {selectableSounds.map((s) => {
@@ -535,7 +535,7 @@ export function WeakSpotGenerator({
                 Specific weak spots, words or situation (optional)
               </label>
               <p id={customHintId} className="text-xs text-muted-foreground">
-                Name any words, sounds, or context you want the text to focus on—for example, “th and r in a job
+                Name any words, sounds, or context you want the sentence to focus on—for example, “th and r in a job
                 interview” or “ordering dinner”.
               </p>
               <Input
@@ -554,7 +554,7 @@ export function WeakSpotGenerator({
               </Button>
               <Button type="submit" className="rounded-full" disabled={busy}>
                 {busy ? <Loader2 className="animate-spin" /> : <Sparkles />}
-                {busy ? "Generating…" : "Generate text"}
+                {busy ? "Generating…" : "Generate sentence"}
               </Button>
             </DialogFooter>
           </form>
@@ -602,7 +602,7 @@ export function GeneratedTextBanner({
           disabled={busy}
         >
           {busy ? <Loader2 className="animate-spin" /> : <RefreshCw />}
-          New weak-spot text
+          New weak-spot sentence
         </Button>
       )}
     </div>

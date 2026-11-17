@@ -1,6 +1,7 @@
 import { getLanguage } from "../languages";
 import { LEVELS, type LevelId } from "../levels";
 import { MINIMAL_PAIRS } from "../minimal-pairs";
+import { isShort, SHORT, splitShort } from "../short";
 import { getSound, soundForIpa, soundsFor } from "../sounds";
 import { tokenize } from "../text";
 import type { Attempt, GeneratedText, ListeningTally, PhonemeResult, WeakPhoneme, WeakWord } from "../types";
@@ -246,13 +247,13 @@ export async function resolveWeakSpots(input: WeakSpotInput, userId?: string) {
   return { words, sounds, contrasts, prosody, customFocus, avoid };
 }
 
+// Every level gets one short sentence: one idea said in one breath, so attention stays on one sound or
+// one tune and the take is cheap to score. Levels differ in vocabulary and density, not in length.
 const LEVEL_GUIDANCE: Record<LevelId, string> = {
-  beginner:
-    "Write ONE short, natural everyday sentence or phrase (6 to 14 words, 30 to 120 characters). Keep vocabulary and grammar simple and conversational while embedding the target weak words and sounds.",
-  intermediate:
-    "Write 1 to 2 natural, connected sentences (15 to 28 words, 80 to 240 characters) in an everyday situation that weave in the target weak words, sounds, and contrasts.",
+  beginner: "Write ONE short, simple everyday sentence (4 to 7 words) with everyday vocabulary and simple grammar.",
+  intermediate: "Write ONE short, natural everyday sentence (5 to 8 words) that a native speaker would actually say.",
   advanced:
-    "Write 2 to 3 rich, articulate sentences (25 to 45 words, 150 to 400 characters) with dense recurrence of the target sounds across word-initial, medial, and final positions, closely juxtaposed minimal-pair contrasts, and natural prosodic movement.",
+    "Write ONE short, dense sentence (5 to 8 words) that packs the target sounds into several words, with minimal-pair contrasts side by side. A natural tongue-twister style is welcome.",
 };
 
 function buildPrompt(
@@ -266,14 +267,15 @@ function buildPrompt(
 
   const system = [
     `You are an expert phonetician and ${language.name} (${language.native}) pronunciation coach.`,
-    `Your job is to compose a single, natural reading-aloud practice text in ${language.name} specifically engineered to drill a learner's pronunciation weak spots.`,
+    `Your job is to compose ONE short, natural sentence in ${language.name} engineered to drill a learner's pronunciation weak spots, plus a few single practice words for the same sounds. Short is the point: the learner practises one thing at a time, first the words alone, then the sentence.`,
     "",
     "Strict requirements:",
-    `1. The practice text ("text") MUST be written entirely in natural, idiomatic ${language.name} (ISO code "${lang}"). Never include phonetic brackets, IPA, markdown, bullet points, or quotation marks inside "text" because it is sent directly to a text-to-speech voice and forced speech aligner.`,
+    `1. The practice sentence ("text") MUST be written entirely in natural, idiomatic ${language.name} (ISO code "${lang}"). Never include phonetic brackets, IPA, markdown, bullet points, or quotation marks inside "text" because it is sent directly to a text-to-speech voice and forced speech aligner.`,
     `2. Level: ${LEVELS[level].name} (${level}). ${LEVEL_GUIDANCE[level]}`,
-    `3. Hard length limit: "text" must be between 15 and 480 characters.`,
+    `3. Hard length limit: "text" is ONE sentence of at most ${SHORT.words} words and at most ${SHORT.chars} characters. Never write two sentences.`,
     "4. Phonetic engineering rules:",
-    "   - Weak words: Naturally weave in as many of the learner's weak words as fit coherently. If a weak word lists what the speech recogniser misheard instead (e.g. 'weather' heard as 'wetter'), include both the weak word and nearby words that exercise that exact phonetic distinction.",
+    "   - Focus: build the sentence around the ONE or TWO most important weak spots. Do not try to cover everything.",
+    "   - Weak words: Include one or two of the learner's weak words if they fit naturally. If a weak word lists what the speech recogniser misheard instead (e.g. 'weather' heard as 'wetter'), include both the weak word and nearby words that exercise that exact phonetic distinction.",
     "   - Weak sounds / phonemes: Pack the sentence(s) with natural words containing those target sounds in varied syllable positions (initial, between vowels, final, or in clusters), addressing the listed common mistake.",
     "   - Weak minimal-pair contrasts: Place words from BOTH sides of the confused contrast near each other in the same sentence so the learner must actively differentiate the two sounds rather than merging them.",
     "   - Prosody weak spots: When 'rhythm' is listed, create clear contrast between stressed content words and reduced/unstressed syllables (or even syllable/mora timing as appropriate to the language). When 'intonation' is listed, use clause structure, contrast, or a question-and-answer cadence that demands clear pitch movement. When 'fluency' is listed, favour smooth word-linking without choppy parentheticals.",
@@ -285,8 +287,9 @@ function buildPrompt(
       ? `6. Include "roman": a clean, standard romanisation of "text" to help learners read the ${language.name} script.`
       : '6. Omit "roman" (or set to null) since this language uses the Latin script.',
     '7. Include "focus": a single concise coaching sentence in English (max 160 characters) addressed directly to the learner explaining which weak spots this text drills and the #1 articulation cue to watch for.',
-    '8. Include "targets": an array of 2 to 6 short strings naming the exact weak words, IPA sounds (e.g. "/θ/"), or contrasts woven into the text.',
-    "9. Return ONLY a valid JSON object matching the requested schema.",
+    '8. Include "targets": an array of 1 to 4 short strings naming the exact weak words, IPA sounds (e.g. "/θ/"), or contrasts woven into the text.',
+    `9. Include "words": an array of 3 to 5 single ${language.name} words (one word each, no phrases, no punctuation) that carry the same target sounds, to drill one at a time before the sentence. Prefer common words, and put both sides of a contrast next to each other when there is one.`,
+    "10. Return ONLY a valid JSON object matching the requested schema.",
   ].join("\n");
 
   const sections: string[] = [
@@ -350,7 +353,7 @@ function buildPrompt(
   }
 
   sections.push(
-    'Respond with JSON: { "text": string, "meaning"?: string, "roman"?: string, "focus": string, "targets": string[] }',
+    'Respond with JSON: { "text": string, "meaning"?: string, "roman"?: string, "focus": string, "targets": string[], "words": string[] }',
   );
 
   return { system, user: sections.join("\n\n") };
@@ -377,7 +380,30 @@ function fallbackGenerate(
       ? `Practise steady articulation across ${targets.join(", ")}.`
       : `Focus on clear sounds and natural ${language.name} rhythm.`,
     targets: targets.length ? targets : [language.name],
+    words: drillWords(lang, [], resolved),
   };
+}
+
+/** Three to five single words to drill before the sentence: the model's own, else weak words and sound examples. */
+function drillWords(
+  lang: string,
+  proposed: unknown,
+  resolved: Awaited<ReturnType<typeof resolveWeakSpots>>,
+): string[] {
+  const fromModel = Array.isArray(proposed) ? proposed.map((w) => String(w)) : [];
+  const fallback = [
+    ...resolved.words.map((w) => w.text),
+    ...resolved.sounds.flatMap((s) => s.examples ?? []),
+    ...resolved.contrasts.flatMap((c) => (c.pairs ?? []).flat()),
+  ];
+  const out = new Map<string, string>();
+  for (const w of [...fromModel, ...fallback]) {
+    const tokens = tokenize(w.trim(), lang);
+    if (tokens.length !== 1) continue;
+    if (!out.has(tokens[0].norm)) out.set(tokens[0].norm, tokens[0].text);
+    if (out.size >= 5) break;
+  }
+  return [...out.values()];
 }
 
 /** Generate a tailored practice text for the learner's weak spots and persist it. */
@@ -398,7 +424,7 @@ export async function generatePracticeText(input: WeakSpotInput, userId?: string
       body: JSON.stringify({
         model: openAiModel(),
         temperature: 0.75,
-        max_tokens: 550,
+        max_tokens: 320,
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: system },
@@ -422,6 +448,7 @@ export async function generatePracticeText(input: WeakSpotInput, userId?: string
       roman?: string | null;
       focus?: string;
       targets?: string[];
+      words?: string[];
     } = {};
     try {
       parsed = JSON.parse(raw);
@@ -429,7 +456,11 @@ export async function generatePracticeText(input: WeakSpotInput, userId?: string
       throw new Error("OpenAI returned invalid JSON.");
     }
 
-    const cleanText = (parsed.text ?? "").trim().replace(/^["“«]+|["”»]+$/g, "").trim();
+    let cleanText = (parsed.text ?? "").trim().replace(/^["“«]+|["”»]+$/g, "").trim();
+    // Keep it to one short take even when the model overshoots. A cut sentence no longer matches
+    // its translation or romanisation, so those are dropped with it.
+    const overshot = cleanText.length > 0 && !isShort(cleanText, input.lang);
+    if (overshot) cleanText = splitShort(cleanText, input.lang)[0]?.text ?? "";
     if (!cleanText) {
       generated = fallbackGenerate(input.lang, input.level, resolved);
     } else {
@@ -441,13 +472,13 @@ export async function generatePracticeText(input: WeakSpotInput, userId?: string
       generated = {
         lang: input.lang,
         level: input.level,
-        text: cleanText.slice(0, 580),
+        text: cleanText.slice(0, SHORT.chars),
         meaning:
-          input.lang !== "en" && typeof parsed.meaning === "string" && parsed.meaning.trim()
+          !overshot && input.lang !== "en" && typeof parsed.meaning === "string" && parsed.meaning.trim()
             ? parsed.meaning.trim()
             : undefined,
         roman:
-          NON_LATIN.has(input.lang) && typeof parsed.roman === "string" && parsed.roman.trim()
+          !overshot && NON_LATIN.has(input.lang) && typeof parsed.roman === "string" && parsed.roman.trim()
             ? parsed.roman.trim()
             : undefined,
         focus:
@@ -456,8 +487,9 @@ export async function generatePracticeText(input: WeakSpotInput, userId?: string
             : "Designed to target your weakest words and sounds in connected speech.",
         targets:
           Array.isArray(parsed.targets) && parsed.targets.length > 0
-            ? parsed.targets.map((t) => String(t).trim()).filter(Boolean).slice(0, 6)
+            ? parsed.targets.map((t) => String(t).trim()).filter(Boolean).slice(0, 4)
             : fallbackTargets,
+        words: drillWords(input.lang, parsed.words, resolved),
       };
     }
   }
@@ -528,7 +560,7 @@ export async function listGeneratedTexts(userId: string, lang: string): Promise<
   });
 }
 
-/** True when a text was generated by Uttala's weak-spot generator. */
+/** True when a text was generated by SayClear's weak-spot generator. */
 export async function isGeneratedText(lang: string, text: string): Promise<boolean> {
   const row = await first<{ id: string }>(
     "SELECT id FROM generated_text WHERE lang = ? AND text = ? LIMIT 1",
@@ -566,7 +598,6 @@ export async function assessWithOpenAi(
   wav: Blob,
   text: string,
   lang: string,
-  level: LevelId,
 ): Promise<OpenAiAssessment> {
   const language = getLanguage(lang);
   const tokens = tokenize(text, lang);
@@ -578,28 +609,33 @@ export async function assessWithOpenAi(
   const base64Audio = Buffer.from(await wav.arrayBuffer()).toString("base64");
 
   const prompt = [
-    `You are a strict, expert clinical phonetician evaluating a ${LEVELS[level].name} (${level}) learner speaking ${language.name} (${language.native}, code "${lang}").`,
+    `You are an expert clinical phonetician evaluating a learner speaking ${language.name} (${language.native}, code "${lang}").`,
     `Target script: "${text}"`,
     `Tokenised target words (${tokens.length}): ${tokens.map((t, i) => `[${i}] "${t.text}"`).join(", ")}`,
     soundGuides ? `Signature ${language.name} sound difficulties to listen for: ${soundGuides}` : "",
     "",
-    "Listen carefully to the learner's audio recording and evaluate every target word and its constituent IPA phonemes.",
+    "Listen carefully to the learner's audio recording and evaluate pronunciation against a native-speaker standard.",
+    "IMPORTANT: Accept any genuine native regional dialect or variety of the language (for example Stockholm, Småland, Skåne or Gothenburg in Swedish; US, UK, Australian or Irish in English) as full native quality (95-100). Penalize only genuine non-native foreign accent interference, phoneme substitutions, wrong vowel length/quality, or unnatural stress.",
+    "Do NOT inflate scores just because a word is recognizable from context.",
     "For each target word in order, provide:",
     '- "index": integer word index matching the tokenised list',
     '- "text": target word string',
-    '- "score": 0..100 phonetic accuracy score for this word (be realistic and discriminating: 88-100 = native-like/crisp, 72-87 = understandable but noticeable accent/slight vowel or consonant drift, 40-71 = clear substitution/voicing/stress error, 0-39 = severe mispronunciation or omitted)',
+    '- "score": integer 0..100 (95-100 = indistinguishable native speech including regional native dialects; 82-94 = near-native with faint accent coloration; 64-81 = understandable with a clear foreign accent or vowel/consonant drift; 38-63 = marked mispronunciation, phoneme substitution, wrong vowel length, or misplaced stress; 0-37 = severe mispronunciation, wrong word, or omitted)',
     '- "errorType": "None" | "Mispronunciation" | "Omission" | "Unclear" | "Stress" | "VowelQuality" | "ConsonantSubstitution" | "FinalConsonant" | "Tone"',
-    '- "expectedIpa": target IPA transcription without slashes (e.g. "θɪŋk")',
-    '- "heardIpa": actual IPA produced by the speaker without slashes (e.g. "sɪŋk" or "tɪŋk")',
-    '- "heard": if the word sounded like a different word, that word (otherwise omit or null)',
-    '- "errorCategory": short label for the issue when score < 85 (e.g. "Voiceless th (/θ/ → /s/)", "Short vowel /ɪ/ tensed to /iː/", "Final consonant devoiced", "Flattened word stress")',
-    '- "diagnosis": when score < 85, a concrete, detailed 1-sentence explanation of exactly what went wrong acoustically/articulatorily in this word (which sound changed, what the tongue/lips/voice did wrong)',
-    '- "fix": when score < 85, a concrete 1-sentence physical articulatory instruction telling the learner how to position their tongue, lips, jaw, or vocal cords to fix it',
-    '- "stressIssue": optional note if syllable stress or tone was misplaced',
-    '- "phonemes": array of phoneme objects for the word: { "ipa": string, "heardIpa"?: string, "score": number (0..100), "issue"?: string, "tip"?: string }',
     "",
-    'Also provide top-level "overallFeedback": 1-2 sentences of specific, constructive phonetic coaching summarising what was clear and the #1-2 sound or prosody habits to fix.',
-    "Respond with valid JSON ONLY, with no markdown fences: { \"overallFeedback\": string, \"words\": [...] }",
+    "IMPORTANT FOR SPEED: For any word with score >= 88 and errorType \"None\", ONLY output {\"index\", \"text\", \"score\", \"errorType\"} and OMIT all other fields.",
+    "ONLY for words with score < 88 (or errorType !== \"None\"), also include:",
+    '- "expectedIpa": target IPA transcription without slashes (e.g. "θɪŋk")',
+    '- "heardIpa": actual IPA produced by the speaker without slashes (e.g. "sɪŋk")',
+    '- "heard": if it sounded like a different word, that word',
+    '- "errorCategory": short label (e.g. "Voiceless th (/θ/ → /s/)")',
+    '- "diagnosis": concise 1-sentence explanation of what changed acoustically/articulatorily',
+    '- "fix": concise 1-sentence physical articulatory instruction (tongue, lips, jaw, voicing)',
+    '- "stressIssue": optional note if syllable stress or tone was misplaced',
+    '- "phonemes": array of { "ipa": string, "heardIpa"?: string, "score": integer 0..100, "issue"?: string, "tip"?: string }',
+    "",
+    'Also provide top-level "overallFeedback": 1-2 sentences of specific phonetic coaching.',
+    'Respond with compact valid JSON ONLY, no markdown fences: { "overallFeedback": string, "words": [...] }',
   ]
     .filter(Boolean)
     .join("\n");
@@ -623,7 +659,7 @@ export async function assessWithOpenAi(
         },
       ],
     }),
-    signal: AbortSignal.timeout(6000),
+    signal: AbortSignal.timeout(25_000),
   });
 
   if (!res.ok) {
@@ -665,35 +701,45 @@ export async function assessWithOpenAi(
     }[];
   };
 
+  const normScore = (raw: unknown, fallback = 75) => {
+    const n = Number(raw ?? fallback);
+    if (!Number.isFinite(n)) return fallback;
+    const scaled = n > 0 && n <= 1 ? n * 100 : n;
+    return Math.max(0, Math.min(100, Math.round(scaled)));
+  };
+
   return {
     overallFeedback:
       typeof parsed.overallFeedback === "string" && parsed.overallFeedback.trim()
         ? parsed.overallFeedback.trim()
         : undefined,
-    words: (parsed.words ?? []).map((w, i) => ({
-      index: typeof w.index === "number" ? w.index : i,
-      text: String(w.text ?? w.word ?? tokens[i]?.text ?? ""),
-      score: Math.max(0, Math.min(100, Math.round(Number(w.score ?? 75)))),
-      errorType: String(w.errorType ?? "None"),
-      expectedIpa: w.expectedIpa ? String(w.expectedIpa).replace(/^\/|\/$/g, "") : undefined,
-      heardIpa: w.heardIpa ? String(w.heardIpa).replace(/^\/|\/$/g, "") : undefined,
-      heard: w.heard ? String(w.heard) : undefined,
-      errorCategory: w.errorCategory ? String(w.errorCategory) : undefined,
-      diagnosis: w.diagnosis ? String(w.diagnosis) : undefined,
-      fix: w.fix ? String(w.fix) : undefined,
-      stressIssue: w.stressIssue ? String(w.stressIssue) : undefined,
-      phonemes: (w.phonemes ?? [])
-        .filter((p) => p && typeof p.ipa === "string" && p.ipa.trim().length > 0)
-        .map((p) => ({
-          ipa: String(p.ipa).replace(/^\/|\/$/g, "").trim(),
-          heardIpa:
-            p.heardIpa && String(p.heardIpa).replace(/^\/|\/$/g, "").trim() !== String(p.ipa).replace(/^\/|\/$/g, "").trim()
-              ? String(p.heardIpa).replace(/^\/|\/$/g, "").trim()
-              : undefined,
-          score: Math.max(0, Math.min(100, Math.round(Number(p.score ?? w.score ?? 75)))),
-          issue: p.issue ? String(p.issue) : undefined,
-          tip: p.tip ? String(p.tip) : undefined,
-        })),
-    })),
+    words: (parsed.words ?? []).map((w, i) => {
+      const wordScore = normScore(w.score, 75);
+      return {
+        index: typeof w.index === "number" ? w.index : i,
+        text: String(w.text ?? w.word ?? tokens[i]?.text ?? ""),
+        score: wordScore,
+        errorType: String(w.errorType ?? "None"),
+        expectedIpa: w.expectedIpa ? String(w.expectedIpa).replace(/^\/|\/$/g, "") : undefined,
+        heardIpa: w.heardIpa ? String(w.heardIpa).replace(/^\/|\/$/g, "") : undefined,
+        heard: w.heard ? String(w.heard) : undefined,
+        errorCategory: w.errorCategory ? String(w.errorCategory) : undefined,
+        diagnosis: w.diagnosis ? String(w.diagnosis) : undefined,
+        fix: w.fix ? String(w.fix) : undefined,
+        stressIssue: w.stressIssue ? String(w.stressIssue) : undefined,
+        phonemes: (w.phonemes ?? [])
+          .filter((p) => p && typeof p.ipa === "string" && p.ipa.trim().length > 0)
+          .map((p) => ({
+            ipa: String(p.ipa).replace(/^\/|\/$/g, "").trim(),
+            heardIpa:
+              p.heardIpa && String(p.heardIpa).replace(/^\/|\/$/g, "").trim() !== String(p.ipa).replace(/^\/|\/$/g, "").trim()
+                ? String(p.heardIpa).replace(/^\/|\/$/g, "").trim()
+                : undefined,
+            score: normScore(p.score, wordScore),
+            issue: p.issue ? String(p.issue) : undefined,
+            tip: p.tip ? String(p.tip) : undefined,
+          })),
+      };
+    }),
   };
 }

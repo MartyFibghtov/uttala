@@ -209,6 +209,12 @@
     radial-gradient(30rem 20rem at 60% 110%, rgb(91 147 214 / 0.12), transparent 70%);
 }
 
+/* Fades hero artwork smoothly into the left typography zone. */
+.hero-artwork-mask {
+  -webkit-mask-image: linear-gradient(to right, transparent 0%, rgb(0 0 0 / 0.25) 34%, rgb(0 0 0 / 0.9) 68%, rgb(0 0 0 / 0.95) 100%);
+  mask-image: linear-gradient(to right, transparent 0%, rgb(0 0 0 / 0.25) 34%, rgb(0 0 0 / 0.9) 68%, rgb(0 0 0 / 0.95) 100%);
+}
+
 /* Native disclosure / accordion styling with intrinsic size transitions. */
 details.disclosure > summary {
   list-style: none;

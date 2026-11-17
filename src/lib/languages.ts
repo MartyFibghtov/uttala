@@ -43,7 +43,9 @@ export interface Language {
   /** The four starter phrases, in the order of STARTER_MEANINGS. */
   starter: string[];
   starterRoman?: string[];
+  /** Short everyday sentences at natural speed, eight words at most (see SHORT in short.ts). */
   intermediate: string[];
+  /** Short, dense sentences and tongue twisters that stack the hardest sounds. */
   advanced: string[];
 }
 
@@ -62,13 +64,17 @@ export const LANGUAGES: Language[] = [
     azure: "en-US",
     starter: STARTER_MEANINGS,
     intermediate: [
-      "I thought the weather would be better this Thursday, but the forecast says there will be heavy rain throughout the whole region.",
-      "On weekends I like to cook dinner for my friends and watch a good film.",
+      "I think it will rain on Thursday.",
+      "We cook dinner for friends on weekends.",
+      "Could you pass the water, please?",
+      "The weather is better than yesterday.",
+      "She walked to work this morning.",
     ],
     advanced: [
-      "Please call Stella. Ask her to bring these things with her from the store: six spoons of fresh snow peas, five thick slabs of blue cheese, and maybe a snack for her brother Bob.",
-      "The North Wind and the Sun were arguing about which of them was stronger, when a traveller came along wrapped in a warm cloak.",
-      "She sells seashells by the seashore, and the shells she sells are seashells, I'm sure.",
+      "Three thin thinkers thought it through.",
+      "Red lorry, yellow lorry.",
+      "She sells seashells by the seashore.",
+      "Which wristwatch is a Swiss wristwatch?",
     ],
   },
   {
@@ -78,12 +84,17 @@ export const LANGUAGES: Language[] = [
     azure: "es-ES",
     starter: ["Hola, ¿cómo estás?", "Muchas gracias.", "¿Dónde está la estación?", "Quisiera un café, por favor."],
     intermediate: [
-      "Mi perro corre rápido por la carretera, pero siempre regresa a casa cuando empieza a llover.",
-      "Los fines de semana me gusta cocinar para mis amigos y ver una buena película.",
+      "Hoy cocino para mis amigos.",
+      "¿Me pasas el agua, por favor?",
+      "Mañana va a llover en la ciudad.",
+      "Vivimos cerca de la estación.",
+      "El tren sale a las ocho.",
     ],
     advanced: [
-      "El viento del norte y el sol discutían sobre cuál de los dos era el más fuerte, cuando pasó un viajero envuelto en una capa gruesa.",
-      "Tres tristes tigres tragaban trigo en un trigal.",
+      "Tres tristes tigres tragaban trigo.",
+      "Erre con erre, guitarra.",
+      "El perro de Rosa corre rápido.",
+      "Pablito clavó un clavito.",
     ],
   },
   {
@@ -93,12 +104,17 @@ export const LANGUAGES: Language[] = [
     azure: "fr-FR",
     starter: ["Bonjour, comment allez-vous ?", "Merci beaucoup.", "Où est la gare ?", "Je voudrais un café, s'il vous plaît."],
     intermediate: [
-      "Un bon vin blanc se boit lentement, surtout quand on le partage avec de vieux amis dans un jardin tranquille.",
-      "Le week-end, j'aime cuisiner pour mes amis et regarder un bon film.",
+      "Il fait beau ce matin.",
+      "Je cuisine pour mes amis le week-end.",
+      "Tu peux répéter, s'il te plaît ?",
+      "Le train part à huit heures.",
+      "Nous habitons près de la gare.",
     ],
     advanced: [
-      "Le vent du nord et le soleil se disputaient, chacun assurant qu'il était le plus fort, quand ils ont vu un voyageur qui s'avançait, enveloppé dans son manteau.",
-      "Les chaussettes de l'archiduchesse sont-elles sèches, archi-sèches ?",
+      "Trois tortues trottaient sur un trottoir.",
+      "Les chaussettes de l'archiduchesse sont sèches.",
+      "Un chasseur sachant chasser sans son chien.",
+      "Si six scies scient six cyprès.",
     ],
   },
   {
@@ -108,12 +124,17 @@ export const LANGUAGES: Language[] = [
     azure: "de-DE",
     starter: ["Hallo, wie geht es dir?", "Vielen Dank.", "Wo ist der Bahnhof?", "Ich möchte einen Kaffee, bitte."],
     intermediate: [
-      "Ich möchte früh am Morgen durch die Stadt laufen und danach frische Brötchen für das Frühstück kaufen.",
-      "Am Wochenende koche ich gern für meine Freunde und schaue einen guten Film.",
+      "Ich trinke morgens gern Kaffee.",
+      "Abends lese ich gern ein Buch.",
+      "Können Sie das bitte wiederholen?",
+      "Der Zug kommt um acht Uhr.",
+      "Wir wohnen nicht weit vom Bahnhof.",
     ],
     advanced: [
-      "Einst stritten sich der Nordwind und die Sonne, wer von ihnen beiden wohl der Stärkere wäre, als ein Wanderer, der in einen warmen Mantel gehüllt war, des Weges kam.",
-      "Fischers Fritz fischt frische Fische, frische Fische fischt Fischers Fritz.",
+      "Fischers Fritz fischt frische Fische.",
+      "Blaukraut bleibt Blaukraut, Brautkleid bleibt Brautkleid.",
+      "Zwischen zwei Zweigen zwitschern zwei Schwalben.",
+      "Der dicke Dachdecker deckt dein Dach.",
     ],
   },
   {
@@ -123,12 +144,17 @@ export const LANGUAGES: Language[] = [
     azure: "it-IT",
     starter: ["Ciao, come stai?", "Grazie mille.", "Dov'è la stazione?", "Vorrei un caffè, per favore."],
     intermediate: [
-      "Ogni sera la nonna prepara gli gnocchi con il sugo di pomodoro e li serve a tutta la famiglia.",
-      "Nel fine settimana mi piace cucinare per i miei amici e guardare un bel film.",
+      "Stasera la nonna prepara la cena.",
+      "Domenica andiamo al mare insieme.",
+      "Può ripetere, per favore?",
+      "Il treno parte alle otto.",
+      "Abitiamo vicino alla stazione.",
     ],
     advanced: [
-      "Il vento del nord e il sole discutevano su chi dei due fosse il più forte, quando arrivò un viaggiatore avvolto in un mantello.",
-      "Trentatré trentini entrarono a Trento, tutti e trentatré trotterellando.",
+      "Trentatré trentini entrarono a Trento.",
+      "Sopra la panca la capra campa.",
+      "Tutta la famiglia mangia gli gnocchi.",
+      "Nonna, quanta ricotta c'è nella pizza?",
     ],
   },
   {
@@ -138,12 +164,17 @@ export const LANGUAGES: Language[] = [
     azure: "pt-BR",
     starter: ["Olá, como vai?", "Muito obrigado.", "Onde fica a estação?", "Eu queria um café, por favor."],
     intermediate: [
-      "Amanhã de manhã vamos caminhar pela praia e depois tomar um café com pão quentinho.",
-      "No fim de semana, gosto de cozinhar para os meus amigos e ver um bom filme.",
+      "Amanhã vamos caminhar pela praia.",
+      "Eu gosto de cozinhar para os amigos.",
+      "Pode repetir, por favor?",
+      "O trem sai às oito horas.",
+      "Moramos perto da estação.",
     ],
     advanced: [
-      "O vento norte e o sol discutiam qual dos dois era o mais forte, quando passou um viajante envolto numa capa.",
       "O rato roeu a roupa do rei de Roma.",
+      "Três pratos de trigo para três tigres tristes.",
+      "A aranha arranha a rã.",
+      "Olha a velha molhando a folha.",
     ],
   },
   {
@@ -153,12 +184,17 @@ export const LANGUAGES: Language[] = [
     azure: "nl-NL",
     starter: ["Hallo, hoe gaat het?", "Dank je wel.", "Waar is het station?", "Ik wil graag een koffie, alstublieft."],
     intermediate: [
-      "Morgen gaan we met de fiets naar het strand en eten we verse vis in de haven.",
-      "In het weekend kook ik graag voor mijn vrienden en kijk ik een goede film.",
+      "Morgen fietsen we naar het strand.",
+      "Na het eten lezen we een boek.",
+      "Kunt u dat nog een keer zeggen?",
+      "De trein vertrekt om acht uur.",
+      "We wonen vlak bij het station.",
     ],
     advanced: [
-      "De noordenwind en de zon hadden een discussie over de vraag wie van hen tweeën de sterkste was, toen er juist iemand voorbijkwam die een dikke, warme jas aanhad.",
       "De kat krabt de krullen van de trap.",
+      "Buiten huilt de uil in de tuin.",
+      "Gezellig gaan we graag naar Groningen.",
+      "Scheveningen ligt aan zee.",
     ],
   },
   {
@@ -168,12 +204,17 @@ export const LANGUAGES: Language[] = [
     azure: "sv-SE",
     starter: ["Hej, hur mår du?", "Tack så mycket.", "Var ligger stationen?", "Jag vill ha en kaffe, tack."],
     intermediate: [
-      "I morgon bitti vill jag ta en lång promenad vid havet och sedan dricka kaffe med en vän.",
-      "På helgerna tycker jag om att laga mat åt mina vänner och se en bra film.",
+      "I morgon tar jag en promenad.",
+      "Efter maten dricker vi kaffe.",
+      "Kan du säga det igen?",
+      "Tåget går klockan åtta.",
+      "Vi bor nära stationen.",
     ],
     advanced: [
-      "Nordanvinden och solen tvistade en gång om vem av dem som var starkast, när en vandrare kom vägen fram, insvept i en varm kappa.",
-      "Sju sjösjuka sjömän åkte till stationen för att köpa nya skjortor.",
+      "Sju sjösjuka sjömän sköttes av sju sköna sjuksköterskor.",
+      "Packa pappas kappsäck.",
+      "Kvistfritt kvastskaft.",
+      "Ute på sjön skiner solen.",
     ],
   },
   {
@@ -183,12 +224,17 @@ export const LANGUAGES: Language[] = [
     azure: "pl-PL",
     starter: ["Cześć, jak się masz?", "Dziękuję bardzo.", "Gdzie jest dworzec?", "Poproszę kawę."],
     intermediate: [
-      "W czwartek wieczorem chcę przeczytać książkę i wypić filiżankę gorącej herbaty.",
-      "W weekendy lubię gotować dla przyjaciół i oglądać dobry film.",
+      "Wieczorem czytam ciekawą książkę.",
+      "Po obiedzie idziemy na spacer.",
+      "Proszę powtórzyć jeszcze raz.",
+      "Pociąg odjeżdża o ósmej.",
+      "Mieszkamy blisko dworca.",
     ],
     advanced: [
-      "Wiatr północny i słońce spierali się, kto z nich jest silniejszy, gdy drogą nadszedł podróżny owinięty w ciepły płaszcz.",
       "W Szczebrzeszynie chrząszcz brzmi w trzcinie.",
+      "Stół z powyłamywanymi nogami.",
+      "Król Karol kupił królowej Karolinie korale.",
+      "Szedł Sasza suchą szosą.",
     ],
   },
   {
@@ -199,12 +245,17 @@ export const LANGUAGES: Language[] = [
     starter: ["Привіт, як справи?", "Дуже дякую.", "Де вокзал?", "Я хотів би каву, будь ласка."],
     starterRoman: ["Pryvit, yak spravy?", "Duzhe diakuiu.", "De vokzal?", "Ya khotiv by kavu, bud laska."],
     intermediate: [
-      "Щоранку я п'ю гарячу каву і читаю новини, перш ніж їхати на роботу.",
-      "На вихідних я люблю готувати для друзів і дивитися хороший фільм.",
+      "Зранку я читаю новини.",
+      "Після вечері ми гуляємо в парку.",
+      "Повторіть, будь ласка, ще раз.",
+      "Потяг відходить о восьмій.",
+      "Ми живемо біля вокзалу.",
     ],
     advanced: [
-      "Північний вітер і сонце сперечалися, хто з них сильніший, коли дорогою проходив мандрівник, загорнутий у теплий плащ.",
-      "Бабин біб розцвів у дощ, буде бабі біб у борщ.",
+      "Бабин біб розцвів у дощ.",
+      "На подвір'ї трава, на траві дрова.",
+      "Гарна гуска гучно гелгоче.",
+      "Сиди, Іване, і пиши листи.",
     ],
   },
   {
@@ -215,12 +266,17 @@ export const LANGUAGES: Language[] = [
     starter: ["Привет, как дела?", "Большое спасибо.", "Где вокзал?", "Мне кофе, пожалуйста."],
     starterRoman: ["Privet, kak dela?", "Bolshoye spasibo.", "Gde vokzal?", "Mne kofe, pozhaluysta."],
     intermediate: [
-      "Каждое утро я пью горячий чай и читаю новости, прежде чем ехать на работу.",
-      "По выходным я люблю готовить для друзей и смотреть хороший фильм.",
+      "Утром я читаю новости.",
+      "После ужина мы гуляем в парке.",
+      "Повторите, пожалуйста, ещё раз.",
+      "Поезд уходит в восемь часов.",
+      "Мы живём недалеко от вокзала.",
     ],
     advanced: [
-      "Однажды северный ветер и солнце спорили, кто из них сильнее, и как раз в это время они заметили путешественника, закутанного в плащ.",
-      "Карл у Клары украл кораллы, а Клара у Карла украла кларнет.",
+      "Карл у Клары украл кораллы.",
+      "Шла Саша по шоссе и сосала сушку.",
+      "Ехал Грека через реку.",
+      "На дворе трава, на траве дрова.",
     ],
   },
   {
@@ -230,12 +286,17 @@ export const LANGUAGES: Language[] = [
     azure: "tr-TR",
     starter: ["Merhaba, nasılsın?", "Çok teşekkür ederim.", "İstasyon nerede?", "Bir kahve istiyorum, lütfen."],
     intermediate: [
-      "Yarın sabah erkenden kalkıp deniz kenarında uzun bir yürüyüş yapmak istiyorum.",
-      "Hafta sonları arkadaşlarım için yemek yapmayı ve güzel bir film izlemeyi severim.",
+      "Yarın sabah sahilde yürüyeceğim.",
+      "Akşamları uzun sohbetler ederiz.",
+      "Tekrar söyler misiniz, lütfen?",
+      "Tren saat sekizde kalkıyor.",
+      "İstasyonun yakınında oturuyoruz.",
     ],
     advanced: [
-      "Kuzey rüzgârı ile güneş, hangisinin daha güçlü olduğunu tartışıyorlardı; o sırada kalın bir paltoya sarınmış bir yolcu geldi.",
-      "Bir berber bir berbere, gel beraber bir berber dükkânı açalım demiş.",
+      "Bir berber bir berbere gel beraber demiş.",
+      "Şu köşe yaz köşesi, şu köşe kış köşesi.",
+      "Dal sarkar, kartal kalkar.",
+      "Kırk küp, kırkının da kulpu kırık.",
     ],
   },
   {
@@ -246,12 +307,17 @@ export const LANGUAGES: Language[] = [
     starter: ["こんにちは、お元気ですか。", "ありがとうございます。", "駅はどこですか。", "コーヒーをお願いします。"],
     starterRoman: ["Konnichiwa, ogenki desu ka.", "Arigatō gozaimasu.", "Eki wa doko desu ka.", "Kōhī o onegai shimasu."],
     intermediate: [
-      "明日の朝、駅の前で友達と会って、一緒に美味しいラーメンを食べに行きます。",
-      "週末は友達のために料理をして、いい映画を見るのが好きです。",
+      "明日、友達と会います。",
+      "晩ご飯のあとで散歩します。",
+      "もう一度言ってください。",
+      "電車は八時に出ます。",
+      "駅の近くに住んでいます。",
     ],
     advanced: [
-      "ある時、北風と太陽が力比べをしました。旅人のコートを脱がせた方が勝ちということに決めて、まず北風から始めました。",
-      "隣の客はよく柿食う客だ。生麦生米生卵。",
+      "隣の客はよく柿食う客だ。",
+      "生麦生米生卵。",
+      "東京特許許可局。",
+      "赤巻紙青巻紙黄巻紙。",
     ],
   },
   {
@@ -262,12 +328,17 @@ export const LANGUAGES: Language[] = [
     starter: ["你好，你好吗？", "非常感谢。", "车站在哪里？", "我想要一杯咖啡，谢谢。"],
     starterRoman: ["Nǐ hǎo, nǐ hǎo ma?", "Fēicháng gǎnxiè.", "Chēzhàn zài nǎlǐ?", "Wǒ xiǎng yào yì bēi kāfēi, xièxie."],
     intermediate: [
-      "明天早上我想去公园散步，然后和朋友一起喝一杯热茶。",
-      "周末我喜欢给朋友们做饭，然后看一部好电影。",
+      "明天我去公园散步。",
+      "晚上我们一起看电影。",
+      "请再说一遍。",
+      "火车八点出发。",
+      "我们住在车站附近。",
     ],
     advanced: [
-      "有一回，北风跟太阳正在争论谁的本事大。说着说着，来了一个过路的人，身上穿着一件厚大衣。",
-      "四是四，十是十，十四是十四，四十是四十。",
+      "四是四，十是十。",
+      "吃葡萄不吐葡萄皮。",
+      "妈妈骑马，马慢，妈妈骂马。",
+      "红鲤鱼与绿鲤鱼与驴。",
     ],
   },
   {
@@ -278,12 +349,17 @@ export const LANGUAGES: Language[] = [
     starter: ["안녕하세요, 잘 지내세요?", "정말 감사합니다.", "역이 어디예요?", "커피 한 잔 주세요."],
     starterRoman: ["Annyeonghaseyo, jal jinaeseyo?", "Jeongmal gamsahamnida.", "Yeogi eodiyeyo?", "Keopi han jan juseyo."],
     intermediate: [
-      "내일 아침에 친구를 만나서 같이 맛있는 음식을 먹으러 갈 거예요.",
-      "주말에는 친구들을 위해 요리하고 좋은 영화를 보는 것을 좋아해요.",
+      "내일 친구를 만나요.",
+      "저녁에 같이 영화를 봐요.",
+      "다시 한번 말씀해 주세요.",
+      "기차는 여덟 시에 출발해요.",
+      "우리는 역 근처에 살아요.",
     ],
     advanced: [
-      "바람과 햇님이 서로 힘이 더 세다고 다투고 있을 때, 한 나그네가 따뜻한 외투를 입고 걸어왔습니다.",
-      "간장 공장 공장장은 강 공장장이고, 된장 공장 공장장은 공 공장장이다.",
+      "간장 공장 공장장은 강 공장장이다.",
+      "경찰청 철창살은 외철창살이다.",
+      "내가 그린 기린 그림.",
+      "저 콩깍지는 깐 콩깍지인가?",
     ],
   },
   {
@@ -295,11 +371,17 @@ export const LANGUAGES: Language[] = [
     starter: ["مرحباً، كيف حالك؟", "شكراً جزيلاً.", "أين المحطة؟", "أريد قهوة من فضلك."],
     starterRoman: ["Marḥaban, kayfa ḥāluk?", "Shukran jazīlan.", "Ayna al-maḥaṭṭa?", "Urīdu qahwa min faḍlik."],
     intermediate: [
-      "أريد أن أشرب فنجاناً من القهوة في الصباح قبل أن أذهب إلى العمل.",
-      "في عطلة نهاية الأسبوع أحب أن أطبخ لأصدقائي وأشاهد فيلماً جيداً.",
+      "أشرب القهوة في الصباح.",
+      "نتمشى في الحديقة بعد العشاء.",
+      "أعد من فضلك مرة أخرى.",
+      "يغادر القطار في الثامنة.",
+      "نسكن قرب المحطة.",
     ],
     advanced: [
-      "كانت ريح الشمال تتجادل مع الشمس في أيهما أقوى من الأخرى، وإذا بمسافر يمر في الطريق متلفعاً بعباءة سميكة.",
+      "خيط حرير على حائط خليل.",
+      "قرأ قيس قصة قصيرة.",
+      "صباح الخير يا صديقي الصغير.",
+      "عين العصفور على العشب.",
     ],
   },
   {
@@ -310,12 +392,17 @@ export const LANGUAGES: Language[] = [
     starter: ["नमस्ते, आप कैसे हैं?", "बहुत धन्यवाद।", "स्टेशन कहाँ है?", "मुझे एक कॉफ़ी चाहिए।"],
     starterRoman: ["Namaste, āp kaise hain?", "Bahut dhanyavād.", "Steshan kahān hai?", "Mujhe ek kofī chāhie."],
     intermediate: [
-      "कल सुबह मैं अपने दोस्त के साथ बाज़ार जाऊँगा और ताज़े फल ख़रीदूँगा।",
-      "सप्ताहांत में मुझे अपने दोस्तों के लिए खाना बनाना और एक अच्छी फ़िल्म देखना पसंद है।",
+      "कल सुबह बाज़ार चलते हैं।",
+      "शाम को हम साथ में टहलते हैं।",
+      "कृपया फिर से बोलिए।",
+      "ट्रेन आठ बजे चलती है।",
+      "हम स्टेशन के पास रहते हैं।",
     ],
     advanced: [
-      "उत्तरी हवा और सूरज इस बात पर झगड़ रहे थे कि उन दोनों में ज़्यादा बलवान कौन है। तभी गरम चोगा पहने एक मुसाफ़िर उधर से गुज़रा।",
       "कच्चा पापड़, पक्का पापड़।",
+      "चंदू के चाचा ने चटनी चटाई।",
+      "खड़क सिंह के खड़कने से खड़कती हैं खिड़कियाँ।",
+      "फल और फूल थाली में हैं।",
     ],
   },
 ];
@@ -381,82 +468,372 @@ const DIAGNOSTIC_OVERRIDES: Record<
 > = {
   en: [
     {
-      text: "Three brothers thought the weather this Thursday would feel much warmer near the river.",
-      targets: ["/θ/ & /ð/ (th)", "/ɹ/ & /l/", "/ɪ/ vs /iː/", "/w/ vs /v/"],
-      cue: "Place your tongue lightly between your teeth on “three” and “this”, and keep “feel” longer than “this”.",
+      text: "Three brothers think this river feels warmer.",
+      targets: ["/θ/ & /ð/ (th)", "/ɹ/ & /l/", "/ɪ/ vs /iː/", "/w/"],
+      cue: "Put your tongue lightly between your teeth on “three” and “this”, and keep “feels” longer than “this”.",
     },
     {
-      text: "It's important to practise a comfortable rhythm so people can understand every word without effort.",
+      text: "It's important to speak at a comfortable pace.",
       targets: ["Word stress", "Schwa /ə/ reduction", "Smooth word linking"],
-      cue: "Lean on the stressed syllables in “important” and “comfortable”, and glide quickly through “to”, “a” and “can”.",
+      cue: "Lean on “im-POR-tant” and “COM-fortable”, and glide quickly through “to”, “at” and “a”.",
     },
     {
-      text: "Are you taking the early train tomorrow, or would you rather drive together in the morning?",
+      text: "Are you taking the train, or driving?",
       targets: ["Question rise ↗", "Choice contrast ↘", "Pitch range"],
-      cue: "Let your pitch rise on “tomorrow” before the comma, then fall gently to close on “morning”.",
+      cue: "Let your pitch rise on “train” before the comma, then fall to close on “driving”.",
     },
   ],
   es: [
     {
-      text: "Mi perro corre rápido por la carretera roja cuando regresamos temprano del trabajo.",
-      meaning: "My dog runs fast along the red road when we return early from work.",
-      targets: ["Rolled rr /r/", "Tapped /ɾ/", "Jota /x/", "Five pure vowels"],
-      cue: "Flutter the tongue tip on “perro” and “carretera”, and keep every unstressed vowel crisp and pure.",
+      text: "Mi perro corre por la carretera roja.",
+      meaning: "My dog runs along the red road.",
+      targets: ["Rolled rr /r/", "Tapped /ɾ/", "Five pure vowels"],
+      cue: "Flutter the tongue tip on “perro”, “corre” and “carretera”, and keep every vowel crisp and pure.",
     },
     {
-      text: "Los fines de semana me gusta cocinar para mis amigos y conversar tranquilamente en el jardín.",
-      meaning: "On weekends I like to cook for my friends and chat calmly in the garden.",
+      text: "Me gusta cocinar para mis amigos.",
+      meaning: "I like to cook for my friends.",
       targets: ["Syllable-timed flow", "Soft /β, ð, ɣ/", "Word stress"],
-      cue: "Give each syllable an even beat and keep medial b, d and g soft between vowels.",
+      cue: "Give each syllable an even beat and keep the g in “amigos” soft between the vowels.",
     },
     {
-      text: "¿Prefieres tomar un café caliente ahora mismo, o caminamos primero hacia la estación?",
-      meaning: "Do you prefer to have a hot coffee right now, or shall we walk to the station first?",
+      text: "¿Quieres un café, o caminamos?",
+      meaning: "Do you want a coffee, or shall we walk?",
       targets: ["Rising question ↗", "Falling alternative ↘", "Vowel linking"],
-      cue: "Raise your pitch through the first question clause, then let it settle smoothly at the end.",
+      cue: "Raise your pitch on “café” before the comma, then let it settle on “caminamos”.",
     },
   ],
   fr: [
     {
-      text: "Un bon vin blanc se boit lentement dans une rue tranquille au cœur de Paris.",
-      meaning: "A good white wine is drunk slowly in a quiet street in the heart of Paris.",
-      targets: ["Nasal vowels /ɑ̃, ɛ̃, ɔ̃/", "French /y/ (rue)", "French /ʁ/", "Rounded /œ/"],
-      cue: "Let air pass through your nose on “bon”, “vin” and “blanc” without pronouncing a hard final n.",
+      text: "Un bon vin blanc dans une rue tranquille.",
+      meaning: "A good white wine in a quiet street.",
+      targets: ["Nasal vowels /ɑ̃, ɛ̃, ɔ̃/", "French /y/ (rue)", "French /ʁ/"],
+      cue: "Let air pass through your nose on “bon”, “vin” and “blanc” with no final n, and round your lips for “rue”.",
     },
     {
-      text: "Le week-end, mes amis aiment cuisiner ensemble et partager un grand repas jusqu'au soir.",
-      meaning: "On the weekend, my friends like to cook together and share a big meal until evening.",
+      text: "Mes amis aiment cuisiner ensemble.",
+      meaning: "My friends like to cook together.",
       targets: ["Even syllable rhythm", "Liaison & linking", "Group-final length"],
-      cue: "Link “mes‿amis” smoothly and lengthen only the last syllable of each phrase group.",
+      cue: "Link “mes‿amis” smoothly and lengthen only the last syllable, “-semble”.",
     },
     {
-      text: "Est-ce que vous prenez le train de huit heures, ou préférez-vous partir un peu plus tard ?",
-      meaning: "Are you taking the eight o'clock train, or do you prefer to leave a little later?",
+      text: "Vous partez à huit heures, ou plus tard ?",
+      meaning: "Are you leaving at eight, or later?",
       targets: ["Continuation rise ↗", "Question melody", "Rounded vowels"],
-      cue: "Lift your voice at “huit heures” before the pause, then glide smoothly through the second half.",
+      cue: "Lift your voice on “huit heures” before the comma, then let it fall on “plus tard”.",
     },
   ],
   de: [
     {
-      text: "Ich möchte früh am Morgen durch die ruhige Straße laufen und frische Brötchen für das Frühstück kaufen.",
-      meaning: "I would like to walk through the quiet street early in the morning and buy fresh rolls for breakfast.",
+      text: "Ich möchte frische Brötchen zum Frühstück.",
+      meaning: "I would like fresh rolls for breakfast.",
       targets: ["ich-sound /ç/", "Umlauts /yː, øː/", "German /ʁ/", "Consonant clusters"],
-      cue: "Keep the tongue forward for /ç/ in “ich” and “möchte”, and round your lips tightly on “früh” and “Brötchen”.",
+      cue: "Keep the tongue forward for /ç/ in “ich” and “möchte”, and round your lips tightly on “Brötchen” and “Frühstück”.",
     },
     {
-      text: "Am Wochenende koche ich gern für meine Freunde und erzähle ihnen von meiner letzten Reise.",
-      meaning: "On weekends I like to cook for my friends and tell them about my last trip.",
+      text: "Am Wochenende koche ich gern für Freunde.",
+      meaning: "At weekends I like to cook for friends.",
       targets: ["Sentence stress", "Unstressed -e /ə/", "Final devoicing"],
-      cue: "Stress the root syllables clearly and let unstressed endings like “-e” and “-en” stay light.",
+      cue: "Stress the root syllables clearly and keep unstressed endings like “-e” and “-en” light.",
     },
     {
-      text: "Fahren wir heute Nachmittag mit dem Zug in die Stadt, oder bleiben wir lieber zu Hause?",
-      meaning: "Are we taking the train into town this afternoon, or would we rather stay at home?",
+      text: "Fahren wir mit dem Zug, oder bleiben wir?",
+      meaning: "Are we taking the train, or are we staying?",
       targets: ["Question rise ↗", "Alternative fall ↘", "ach-sound /x/"],
-      cue: "Let your voice rise on “Stadt” before the comma and fall cleanly on “zu Hause”.",
+      cue: "Let your voice rise on “Zug” before the comma and fall cleanly on “bleiben wir”.",
+    },
+  ],
+  it: [
+    {
+      text: "La nonna prepara gli gnocchi per tutti.",
+      meaning: "Grandma makes gnocchi for everyone.",
+      targets: ["Double consonants (nn/tt)", "gn /ɲ/ & gli /ʎ/", "Rolled /r/", "Pure vowels"],
+      cue: "Hold the double consonants in “nonna” and “tutti” twice as long, and keep “gli gnocchi” smooth.",
+    },
+    {
+      text: "Mi piace cucinare per i miei amici.",
+      meaning: "I like to cook for my friends.",
+      targets: ["Even syllable flow", "Word stress", "Smooth linking"],
+      cue: "Keep unstressed vowels crisp, never a schwa, and lean gently on “-na-” in “cucinare”.",
+    },
+    {
+      text: "Prendi un caffè adesso, o dopo?",
+      meaning: "Are you having a coffee now, or later?",
+      targets: ["Question rise ↗", "Choice contrast ↘", "Natural cadence"],
+      cue: "Let your voice rise on “adesso” before the comma, then fall gently on “dopo”.",
+    },
+  ],
+  pt: [
+    {
+      text: "Amanhã de manhã comemos pão quentinho.",
+      meaning: "Tomorrow morning we eat warm bread.",
+      targets: ["Nasal vowels /ɐ̃, õ/", "nh /ɲ/", "Open/closed e, o"],
+      cue: "Let air resonate through your nose on “amanhã” and “pão” without adding a hard final n.",
+    },
+    {
+      text: "Gosto de conversar depois do jantar.",
+      meaning: "I like to chat after dinner.",
+      targets: ["Word stress", "Unstressed vowel reduction", "Smooth linking"],
+      cue: "Lean on the stressed “-sar” and “-tar”, and let unstressed final vowels glide lightly into the next word.",
+    },
+    {
+      text: "Você vai de trem, ou caminhando?",
+      meaning: "Are you going by train, or walking?",
+      targets: ["Question rise ↗", "Choice contrast ↘", "Natural cadence"],
+      cue: "Lift your pitch on “trem” before the comma, then let it settle on “caminhando”.",
+    },
+  ],
+  nl: [
+    {
+      text: "Morgen gaan we gezellig naar buiten.",
+      meaning: "Tomorrow we're going outside together.",
+      targets: ["Dutch g /x/", "ui /œy/ diphthong", "Long vs. short vowels"],
+      cue: "Give “morgen” and “gezellig” gentle friction at the back of the throat, and round your lips for “ui” in “buiten”.",
+    },
+    {
+      text: "Ik kook graag voor mijn vrienden.",
+      meaning: "I like to cook for my friends.",
+      targets: ["Word stress", "Schwa /ə/ reduction", "Smooth linking"],
+      cue: "Stress “kook” and “vrien-” clearly and keep “voor” and “mijn” light.",
+    },
+    {
+      text: "Neem je de trein, of blijf je hier?",
+      meaning: "Are you taking the train, or staying here?",
+      targets: ["Question rise ↗", "Choice contrast ↘", "Natural cadence"],
+      cue: "Let your pitch rise on “trein” before the comma, then drop cleanly on “hier”.",
+    },
+  ],
+  sv: [
+    {
+      text: "I morgon köper jag en skjorta vid sjön.",
+      meaning: "Tomorrow I'll buy a shirt by the lake.",
+      targets: ["sj-sound /ɧ/", "Rounded ö /ø/", "Vowel length /ː/", "Pitch accent"],
+      cue: "Round your lips on “skjorta” and “sjön”, and hold the long vowel in “köper” longer than the short ones.",
+    },
+    {
+      text: "På helgerna lagar jag middag åt vänner.",
+      meaning: "At weekends I cook dinner for friends.",
+      targets: ["Long & short syllables", "Tone-2 pitch melody", "Smooth linking"],
+      cue: "Give every stressed word one long beat, either a long vowel or a long consonant, without pausing.",
+    },
+    {
+      text: "Tar du tåget, eller vill du gå?",
+      meaning: "Are you taking the train, or do you want to walk?",
+      targets: ["Question rise ↗", "Swedish pitch accent", "Natural cadence"],
+      cue: "Let your voice lift on “tåget” before the comma, then fall naturally on “gå”.",
+    },
+  ],
+  pl: [
+    {
+      text: "Wieczorem chcę wypić filiżankę herbaty.",
+      meaning: "In the evening I want to drink a cup of tea.",
+      targets: ["cz vs. ć", "Nasal ę", "Vowel y /ɨ/", "Consonant clusters"],
+      cue: "Keep “cz” in “wieczorem” dark with the tongue tip back, brighten “ć” in “wypić”, and add no vowel inside “chcę”.",
+    },
+    {
+      text: "Lubię gotować obiad dla przyjaciół.",
+      meaning: "I like to cook dinner for my friends.",
+      targets: ["Penultimate word stress", "Voicing assimilation", "Smooth linking"],
+      cue: "Stress the second-to-last syllable of each word: LU-bię, go-TO-wać, przy-JA-ciół.",
+    },
+    {
+      text: "Jedziesz pociągiem, czy idziemy pieszo?",
+      meaning: "Are you going by train, or shall we walk?",
+      targets: ["Question rise ↗", "Clause contrast ↘", "Natural cadence"],
+      cue: "Raise your pitch on “pociągiem” before the comma, then let your voice settle on “pieszo”.",
+    },
+  ],
+  uk: [
+    {
+      text: "Щоранку ми п'ємо гарячу каву на балконі.",
+      roman: "Shchoranku my p'iemo hariachu kavu na balkoni.",
+      meaning: "Every morning we drink hot coffee on the balcony.",
+      targets: ["Ukrainian г /ɦ/", "и /ɪ/ vs. і /i/", "Soft consonants /ʲ/"],
+      cue: "Keep “г” breathy and voiced in “гарячу”, and keep “и” in “ми” distinct from the clear “і” in “балконі”.",
+    },
+    {
+      text: "На вихідних я готую вечерю для друзів.",
+      roman: "Na vykhidnykh ya hotuiu vecheriu dlia druziv.",
+      meaning: "At weekends I cook dinner for friends.",
+      targets: ["Word stress", "Clear unstressed vowels", "Smooth linking"],
+      cue: "Hit the stressed syllable firmly, go-TU-yu, ve-CHE-riu, and keep unstressed “о” and “е” clear.",
+    },
+    {
+      text: "Ти поїдеш потягом, чи підемо пішки?",
+      roman: "Ty poyidesh potiahom, chy pidemo pishky?",
+      meaning: "Are you going by train, or shall we walk?",
+      targets: ["Question rise ↗", "Choice contrast ↘", "Natural cadence"],
+      cue: "Let your pitch rise on “потягом” before the comma, then glide down at the end.",
+    },
+  ],
+  ru: [
+    {
+      text: "Каждое утро мы пьём горячий чай.",
+      roman: "Kazhdoye utro my pyom goryachiy chay.",
+      meaning: "Every morning we drink hot tea.",
+      targets: ["Vowel reduction (о→а)", "Hard vs. soft /ʲ/", "ы /ɨ/", "Rolled /r/"],
+      cue: "Relax unstressed “о” toward “а” in “горячий”, keep “ы” in “мы” deep, and soften “пь” in “пьём”.",
+    },
+    {
+      text: "По выходным я готовлю ужин для друзей.",
+      roman: "Po vykhodnym ya gotovlyu uzhin dlya druzey.",
+      meaning: "At weekends I cook dinner for friends.",
+      targets: ["Strong word stress", "Unstressed reduction", "Smooth linking"],
+      cue: "Lean on one vowel per word, ga-TOV-lyu, U-zhin, dru-ZEY, and keep the rest short and light.",
+    },
+    {
+      text: "Ты поедешь на поезде, или пойдём пешком?",
+      roman: "Ty poyedesh na poyezde, ili poydyom peshkom?",
+      meaning: "Are you going by train, or shall we walk?",
+      targets: ["Question rise (IK-3) ↗", "Choice fall ↘", "Natural cadence"],
+      cue: "Raise your pitch sharply on “поезде” before the comma, then let it fall cleanly at the end.",
+    },
+  ],
+  tr: [
+    {
+      text: "Yarın sabah sıcak bir kahve içip yürüyeceğim.",
+      meaning: "Tomorrow morning I'll drink a hot coffee and walk.",
+      targets: ["Undotted ı /ɯ/", "ü /y/", "Soft ğ /ɰ/", "Tapped /ɾ/"],
+      cue: "Keep “ı” in “sıcak” unrounded, round your lips on “yürüyeceğim”, and let “ğ” lengthen the vowel before it.",
+    },
+    {
+      text: "Arkadaşlarım için yemek yapmayı severim.",
+      meaning: "I love cooking for my friends.",
+      targets: ["Final-syllable stress", "Vowel harmony", "Smooth linking"],
+      cue: "Give each suffix an even, crisp beat and don't drop light final consonants between words.",
+    },
+    {
+      text: "Trenle mi gidiyorsun, yoksa yürüyelim mi?",
+      meaning: "Are you going by train, or shall we walk?",
+      targets: ["Question particle (mi) ↗", "Choice contrast ↘", "Natural cadence"],
+      cue: "Lift your pitch just before “mi” in the first clause, then lower it on the final question.",
+    },
+  ],
+  ja: [
+    {
+      text: "東京駅で、ちょっと熱いコーヒーを飲みます。",
+      roman: "Tōkyō-eki de, chotto atsui kōhī o nomimasu.",
+      meaning: "At Tokyo Station, I drink a rather hot coffee.",
+      targets: ["Long vowels /ː/", "Double consonants (っ)", "つ /ts/"],
+      cue: "Hold “Tōkyō” and “kōhī” for two full beats each, and pause one beat on “っ” in “chotto”.",
+    },
+    {
+      text: "週末は友達と映画を見ます。",
+      roman: "Shūmatsu wa tomodachi to eiga o mimasu.",
+      meaning: "At weekends I watch films with friends.",
+      targets: ["Even mora timing", "Pitch accent drops", "Devoiced vowels"],
+      cue: "Keep every beat the same length and mark words with pitch, not with loud English-style stress.",
+    },
+    {
+      text: "電車で行きますか、それとも歩きますか。",
+      roman: "Densha de ikimasu ka, soretomo arukimasu ka.",
+      meaning: "Will you go by train, or will you walk?",
+      targets: ["Clause rise ↗", "Question particle か ↗", "Pitch accent contour"],
+      cue: "Let your pitch rise gently into the first “ka” before the pause, then finish clearly on the last “ka”.",
+    },
+  ],
+  zh: [
+    {
+      text: "明天早上我去茶馆喝热茶。",
+      roman: "Míngtiān zǎoshang wǒ qù cháguǎn hē rè chá.",
+      meaning: "Tomorrow morning I'm going to the teahouse for hot tea.",
+      targets: ["Four tones", "Retroflex zh/ch/sh", "Palatal j/q/x"],
+      cue: "Keep each tone distinct: third-tone dips in “wǒ” and “guǎn”, sharp fourth-tone falls in “qù” and “rè”.",
+    },
+    {
+      text: "周末我喜欢给朋友们做饭。",
+      roman: "Zhōumò wǒ xǐhuan gěi péngyoumen zuò fàn.",
+      meaning: "At weekends I like to cook for my friends.",
+      targets: ["Tone sandhi & neutral tone", "Aspiration pʰ/tʰ/kʰ", "Phrase grouping"],
+      cue: "Keep neutral tones like “huan” and “men” short and light, and give the toned syllables their full length.",
+    },
+    {
+      text: "你坐火车去，还是走路去呢？",
+      roman: "Nǐ zuò huǒchē qù, háishi zǒulù qù ne?",
+      meaning: "Are you going by train, or on foot?",
+      targets: ["Tone contour preservation", "Choice cadence (还是)", "Question ending ↗"],
+      cue: "Keep every word's own tone while lifting the whole phrase gently toward “ne”.",
+    },
+  ],
+  ko: [
+    {
+      text: "빵집에서 따뜻한 커피를 샀어요.",
+      roman: "Ppangjibeseo ttatteutan keopireul sasseoyo.",
+      meaning: "I bought a warm coffee at the bakery.",
+      targets: ["Plain / aspirated / tense stops", "ㅡ /ɯ/ vowel", "Final batchim"],
+      cue: "Hold tense “빵” and “따” tightly with no breath, and give aspirated “커피” a clear puff of air.",
+    },
+    {
+      text: "주말에는 집에서 음식을 만들어요.",
+      roman: "Jumareneun jibeseo eumsigeul mandeureoyo.",
+      meaning: "At weekends I cook at home.",
+      targets: ["Even syllable flow", "Sound linking (연음)", "Stop closure (batchim)"],
+      cue: "Carry each final consonant into the next vowel, “지베서”, “음시글”, without chopping between syllables.",
+    },
+    {
+      text: "기차를 탈까요, 아니면 걸을까요?",
+      roman: "Gichareul talkkayo, animyeon georeulkkayo?",
+      meaning: "Shall we take the train, or walk?",
+      targets: ["Clause rise ↗", "Question ending (-까요) ↗", "Natural cadence"],
+      cue: "Let your pitch rise gently on “탈까요” before the comma, then lift lightly at the end.",
+    },
+  ],
+  ar: [
+    {
+      text: "أشرب في الصباح قهوة ساخنة قبل عملي.",
+      roman: "Ashrabu fī ṣ-ṣabāḥi qahwatan sākhinatan qabla 'amalī.",
+      meaning: "In the morning I drink hot coffee before work.",
+      targets: ["ع /ʕ/ & ح /ħ/", "Emphatic ص /sˤ/ & ق /q/", "Short vs. long vowels"],
+      cue: "Say “ح” in “الصباح” and “ع” in “عملي” deep in the throat, and keep “ق” far back in “قهوة”.",
+    },
+    {
+      text: "أحب أن أطبخ لأصدقائي بعد العمل.",
+      roman: "Uḥibbu an aṭbukha li-aṣdiqā'ī ba'da l-'amal.",
+      meaning: "I like to cook for my friends after work.",
+      targets: ["Long vowel timing", "Doubled consonants (shadda)", "Smooth linking"],
+      cue: "Hold the doubled “بّ” in “أحبّ” and the long “ā” in “أصدقائي” for their full beat.",
+    },
+    {
+      text: "هل تركب القطار، أم نمشي معاً؟",
+      roman: "Hal tarkabu l-qiṭār, am namshī ma'an?",
+      meaning: "Are you taking the train, or shall we walk together?",
+      targets: ["Question rise (هل) ↗", "Choice contrast (أم) ↘", "Natural cadence"],
+      cue: "Let your voice lift on “القطار” before the comma, then settle smoothly at the end.",
+    },
+  ],
+  hi: [
+    {
+      text: "कल सुबह ताज़े फल और ठंडा पानी लेंगे।",
+      roman: "Kal subah tāze phal aur ṭhanḍā pānī lenge.",
+      meaning: "Tomorrow morning we'll get fresh fruit and cold water.",
+      targets: ["Aspirated ph/ṭh", "Dental vs. retroflex", "Nasal vowels"],
+      cue: "Give “फल” and “ठंडा” a clear puff of air, curl the tongue back for “ठ” and “ड”, and keep “ता” dental.",
+    },
+    {
+      text: "हमें दोस्तों के लिए खाना बनाना पसंद है।",
+      roman: "Hamein doston ke lie khānā banānā pasand hai.",
+      meaning: "We like to cook for our friends.",
+      targets: ["Even syllable timing", "Schwa deletion", "Smooth linking"],
+      cue: "Keep syllables crisp and even, and don't add a vowel at the end of “पसंद”.",
+    },
+    {
+      text: "आप ट्रेन से जाएँगे, या पैदल चलें?",
+      roman: "Āp ṭren se jāenge, yā paidal chalein?",
+      meaning: "Will you go by train, or shall we walk?",
+      targets: ["Question rise ↗", "Choice contrast ↘", "Natural cadence"],
+      cue: "Let your pitch rise toward “जाएँगे” before the comma, then fall gently at the end.",
     },
   ],
 };
+
+function firstSentence(text: string, code: string): string {
+  const seg = new Intl.Segmenter(code, { granularity: "sentence" });
+  for (const s of seg.segment(text.trim())) {
+    const t = s.segment.trim();
+    if (t) return t;
+  }
+  return text.trim();
+}
 
 /**
  * Three-stage diagnostic pronunciation test for a language:
@@ -499,9 +876,9 @@ export function diagnosticPromptsFor(code: string): DiagnosticPrompt[] {
   const melodySound = sounds.find((s) => s.kind === "melody");
   const starter0 = textsFor(l.code, "beginner")[0];
   const starter2 = textsFor(l.code, "beginner")[2];
-  const inter0 = l.intermediate[0] ?? starter0.text;
-  const inter1 = l.intermediate[1] ?? inter0;
-  const adv0 = l.advanced[0] ?? inter0;
+  const inter0 = firstSentence(l.intermediate[0] ?? starter0.text, l.code);
+  const inter1 = firstSentence(l.intermediate[1] ?? inter0, l.code);
+  const adv0 = firstSentence(l.advanced[0] ?? inter0, l.code);
 
   return [
     {
@@ -523,10 +900,10 @@ export function diagnosticPromptsFor(code: string): DiagnosticPrompt[] {
     {
       kind: "melody",
       title: "Melody & intonation",
-      subtitle: "Tests how your voice rises for a question and falls on a polite statement.",
-      text: `${starter2.text} ${starter0.text}`,
-      meaning: starter2.meaning && starter0.meaning ? `${starter2.meaning} ${starter0.meaning}` : undefined,
-      roman: starter2.roman && starter0.roman ? `${starter2.roman} ${starter0.roman}` : undefined,
+      subtitle: "Tests how your voice rises on a question and settles naturally at the end.",
+      text: firstSentence(starter2.text, l.code),
+      meaning: starter2.meaning,
+      roman: starter2.roman,
       targets: ["Question pitch ↗", "Phrase melody ↘", "Natural cadence"],
       cue: "Let your pitch move naturally across the question rather than keeping a flat monotone.",
     },

@@ -21,6 +21,7 @@ import { ACHIEVEMENTS, isUnlocked } from "@/lib/gamification";
 import { PLANS } from "@/lib/plans";
 import { useOverview } from "@/lib/stats";
 import { isDue, markBadgesSeen, useStore } from "@/lib/store";
+import { SITE } from "@/lib/site";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -85,7 +86,7 @@ export function Logo({ href = "/" }: { href?: string }) {
           <span key={i} className="w-[3px] rounded-full bg-foreground" style={{ height: h }} />
         ))}
       </span>
-      Uttala
+      {SITE.name}
     </Link>
   );
 }

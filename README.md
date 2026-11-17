@@ -1,6 +1,6 @@
-# Uttala
+# SayClear
 
-Pronunciation coaching as a web service. Learners read a text aloud, see which words a listener would miss, compare their rhythm and melody with a native voice, and drill the weak spots. 17 languages, three levels, free and paid plans.
+Pronunciation coaching as a web service. Learners say one short sentence at a time, drilling the hard words on their own first, see which words a listener would miss, compare their rhythm and melody with a native voice, and drill the weak spots. 17 languages, three levels, free and paid plans.
 
 ## Run locally
 
@@ -10,7 +10,7 @@ pnpm install
 pnpm dev
 ```
 
-The database is a local SQLite file (`.data/uttala.db`) and its tables are created on first request. Without Stripe keys every feature is unlocked and nothing is sold, which is convenient for development.
+The database is a local SQLite file (`.data/sayclear.db`) and its tables are created on first request. Without Stripe keys every feature is unlocked and nothing is sold, which is convenient for development.
 
 ## What is in the box
 
@@ -18,14 +18,15 @@ The database is a local SQLite file (`.data/uttala.db`) and its tables are creat
 | --- | --- |
 | Accounts | Email and password (optional Google), password reset, account deletion. [Better Auth](https://better-auth.com) on libSQL. |
 | Scoring | ElevenLabs Scribe (what was heard), Forced Alignment (where each word is and how well it fits), text-to-speech with timings (reference). Pitch tracking and rhythm/melody comparison run in the browser. Azure Pronunciation Assessment adds sound-by-sound scores when configured. |
-| Levels | `src/lib/levels.ts`. Beginner: short phrases with meaning and romanisation, slow playback, lenient scoring. Intermediate: sentences. Advanced: hard passages, strict scoring, more weight on rhythm and melody. |
+| Short takes | Everything practised is one word or one short sentence (`SHORT` in `src/lib/short.ts`: 8 words aimed for, 10 allowed, 120 characters, 12-second recordings). Long own texts are split into short sentences (`splitShort`). Every sentence comes with a word ladder: the hard words alone, then the whole sentence (`ladderWords`, `src/components/word-ladder.tsx`). The limits are enforced in `/api/assess` and `/api/tts` too. |
+| Levels | `src/lib/levels.ts`. Beginner: short phrases with meaning and romanisation, slow playback. Intermediate: short everyday sentences. Advanced: short dense sentences and tongue twisters. Scoring is one scale for all levels (`SCORE_SCALE`). |
 | Voices | Voices from your ElevenLabs account, grouped into roles (teacher, everyday, storyteller, presenter, creator, character). "Auto" picks a native voice suited to the level. |
 | Plans | `src/lib/plans.ts` is the single place for prices, limits and feature lists. Limits are enforced on the server in `/api/assess` and `/api/tts`. |
 | Payments | Stripe Checkout for sign-up, the Customer Portal for changes and cancellation, a signed webhook that keeps plans in sync. |
 | Home | Daily plan (drills due, next course unit, ear training, a free reading), points goal, streak and rank. `src/components/home-view.tsx`. |
 | Course | Seven phrasebook units of four phrases in every language (`src/lib/course.ts`), with meanings, romanisation and up to three stars per phrase. |
 | Sound library | Guides to the sounds learners get wrong in each language: how to make them, what to watch for, practice words (`src/lib/sounds.ts`). Sound-level scores link to the matching guide. |
-| Drills | Unclear words are collected automatically. Three clear takes in a row, then spaced checks after 2 and 7 days, then mastered (`recordAttempt` in `src/lib/store.ts`). Listening drills use minimal pairs (`src/lib/minimal-pairs.ts`) and track accuracy per contrast. |
+| Drills | Unclear words are collected automatically, each with the short stretch of sentence it came from. Each is drilled alone, then in that sentence, then in a freshly generated one with its own drill words. Three clear takes in a row, then spaced checks after 2 and 7 days, then mastered (`recordAttempt` in `src/lib/store.ts`). Listening drills use minimal pairs (`src/lib/minimal-pairs.ts`) and track accuracy per contrast. |
 | Checkpoint | Three fixed readings scored at one strictness, giving a comparable number and a recommended level. |
 | Motivation | Points, daily goal, streaks, ranks and 18 achievements (`src/lib/gamification.ts`). Points measure practice, not skill. |
 | Progress | Practice calendar, score trend, five skills with change over time, checkpoints, achievements. History, course progress and drill list are kept in the browser and synced to the account (`/api/state`). Audio is never stored. |
@@ -49,7 +50,7 @@ New subscribers get a 7-day trial. Pro is only offered when Azure Speech is conf
 
 Why this shape: the free plan is enough to reach the first useful result (activation) but its daily cap and locked melody chart create natural upgrade moments; Plus is the default choice and carries everything most learners need; Pro anchors the price and serves the "sound native" audience. Yearly billing is preselected and shown as a monthly figure.
 
-Rough cost per analysed recording is 1–2 US cents (transcription, alignment, optional Azure). Reference audio for built-in texts is generated once and cached in the database; custom texts are capped per day per plan.
+Engines bill by the second of audio and the character of text, so short takes keep each analysed recording well under the old 1–2 US cents (transcription, alignment, optional Azure). Reference audio for built-in texts is generated once and cached in the database; custom texts are capped per day per plan.
 
 ## Going live
 

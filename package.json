@@ -1,5 +1,5 @@
 {
-  "name": "uttala",
+  "name": "sayclear",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -8,9 +8,15 @@
     "start": "next start",
     "lint": "eslint",
     "stripe:setup": "node scripts/stripe-setup.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "calibrate": "npx -y tsx --tsconfig tsconfig.json scripts/calibrate.mts",
+    "realset": "npx -y tsx --tsconfig tsconfig.json scripts/realset.mts",
+    "phonecheck": "npx -y tsx --tsconfig tsconfig.json scripts/phonecheck.mts",
+    "gopcheck": "npx -y tsx --tsconfig tsconfig.json scripts/gopcheck.mts",
+    "tune-deductions": "npx -y tsx --tsconfig tsconfig.json scripts/tune-deductions.mts"
   },
   "dependencies": {
+    "@huggingface/transformers": "3.8.1",
     "@libsql/client": "^0.18.0",
     "@libsql/kysely-libsql": "^0.4.1",
     "better-auth": "^1.7.18",

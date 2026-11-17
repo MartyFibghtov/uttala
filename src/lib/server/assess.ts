@@ -1,8 +1,8 @@
 import { getLanguage } from "../languages";
-import { LEVELS, statusFor, type LevelId } from "../levels";
+import { SCORE_SCALE, statusFor, toNativeScale } from "../levels";
 import { enrichWordDiagnostics, extractFocusSounds } from "../phonetics";
-import { align, normalize, similarity, timeTokens, tokenize, type Token } from "../text";
-import type { AssessResult, WordResult } from "../types";
+import { align, normalize, sameWord, similarity, timeTokens, tokenize, type Token } from "../text";
+import type { AssessResult, CheckDepth, WordResult } from "../types";
 import { assessWithAzure, hasAzure, type AzureAssessment } from "./azure";
 import { forcedAlign, hasElevenLabs, transcribe, type ForcedAlignment, type Transcript } from "./elevenlabs";
 import { assessWithOpenAi, hasOpenAi, type OpenAiAssessment } from "./openai";
@@ -11,11 +11,19 @@ const clamp = (v: number, lo = 0, hi = 100) => Math.max(lo, Math.min(hi, v));
 const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
 
 /**
- * Alignment loss → 0..1 "acoustic fit". ElevenLabs does not document the scale
- * of `loss`, so this mapping is calibrated against rated recordings.
+ * Alignment loss → 0..1 "acoustic fit". Measured native ElevenLabs forced alignment
+ * losses typically sit around 0.25–0.70, so we shift and soften the decay curve.
  */
-const FIT_SCALE = Number(process.env.ALIGNMENT_LOSS_SCALE ?? 1);
-const fitFromLoss = (loss: number) => Math.exp(-Math.max(0, loss) * FIT_SCALE);
+const FIT_SCALE = Number(process.env.ALIGNMENT_LOSS_SCALE ?? 0.75);
+const fitFromLoss = (loss: number) => Math.min(1, Math.exp(-Math.max(0, loss - 0.25) * FIT_SCALE));
+
+/** No speech was recognised in the recording, so there is nothing fair to score. */
+export class NoSpeechError extends Error {
+  constructor() {
+    super("We didn't catch any speech in that recording. Check your microphone and try again, speaking a little louder.");
+    this.name = "NoSpeechError";
+  }
+}
 
 interface Heard {
   norm: string;
@@ -47,7 +55,6 @@ function heardTokens(t: Transcript, locale: string): Heard[] {
 export function buildResult(
   text: string,
   lang: string,
-  level: LevelId,
   duration: number,
   parts: {
     fa?: ForcedAlignment;
@@ -125,7 +132,49 @@ export function buildResult(
   let understood = 0;
   if (stt) {
     const heard = heardTokens(stt, lang);
-    for (const op of align(tokens.map((t) => t.norm), heard.map((h) => h.norm))) {
+    const rawOps = align(tokens.map((t) => t.norm), heard.map((h) => h.norm));
+    // Reconcile compound merges/splits in STT (e.g. "I morgon" vs "Imorgon").
+    const ops: typeof rawOps = [];
+    for (let k = 0; k < rawOps.length; k++) {
+      const a = rawOps[k];
+      const b = rawOps[k + 1];
+      if (a && b) {
+        const mergedHi = a.type === "del" && b.type === "sub" ? b.hi : a.type === "sub" && b.type === "del" ? a.hi : -1;
+        if (mergedHi >= 0 && a.type !== "ins" && b.type !== "ins" && tokens[a.ti].norm + tokens[b.ti].norm === heard[mergedHi].norm) {
+          const h = heard[mergedHi];
+          const lenA = Math.max(1, tokens[a.ti].norm.length);
+          const lenB = Math.max(1, tokens[b.ti].norm.length);
+          const split = h.start + ((h.end - h.start) * lenA) / (lenA + lenB);
+          const idx1 = heard.length;
+          heard.push({ norm: tokens[a.ti].norm, text: tokens[a.ti].text, start: h.start, end: split, conf: h.conf });
+          heard.push({ norm: tokens[b.ti].norm, text: tokens[b.ti].text, start: split, end: h.end, conf: h.conf });
+          ops.push({ type: "match", ti: a.ti, hi: idx1 });
+          ops.push({ type: "match", ti: b.ti, hi: idx1 + 1 });
+          k++;
+          continue;
+        }
+        const splitTi = a.type === "sub" && b.type === "ins" ? a.ti : a.type === "ins" && b.type === "sub" ? b.ti : -1;
+        if (splitTi >= 0 && a.type !== "del" && b.type !== "del" && tokens[splitTi].norm === heard[a.hi].norm + heard[b.hi].norm) {
+          const h1 = heard[a.hi];
+          const h2 = heard[b.hi];
+          const confs = [h1.conf, h2.conf].filter((v): v is number => v !== undefined);
+          const idx = heard.length;
+          heard.push({
+            norm: tokens[splitTi].norm,
+            text: tokens[splitTi].text,
+            start: h1.start,
+            end: h2.end,
+            conf: confs.length ? mean(confs) : undefined,
+          });
+          ops.push({ type: "match", ti: splitTi, hi: idx });
+          k++;
+          continue;
+        }
+      }
+      ops.push(a);
+    }
+
+    for (const op of ops) {
       if (op.type === "ins") {
         insertions.push(heard[op.hi].text);
         continue;
@@ -165,21 +214,25 @@ export function buildResult(
         }
       }
 
-      if (op.type === "match") {
+      // A recogniser spelling the word another accepted way ("practice" for "practise") heard it right.
+      if (op.type === "match" || sameWord(tokens[op.ti].norm, h.norm, lang)) {
         understood++;
-        const signals = [h.conf, fit[op.ti]].filter((v): v is number => v !== undefined);
-        w.score = clamp(Math.round(60 + 40 * (signals.length ? mean(signals) : 0.75)));
-        w.status = statusFor(w.score, level);
+        const f = fit[op.ti];
+        const c = h.conf;
+        const raw = f !== undefined && c !== undefined ? f * 0.8 + c * 0.2 : (f ?? c ?? 0.65);
+        w.score = clamp(Math.round(96 * Math.pow(Math.max(0, Math.min(1, raw)), 1.4)));
+        w.status = statusFor(w.score);
       } else {
         w.heard = h.text;
-        w.score = clamp(Math.round(55 * similarity(tokens[op.ti].norm, h.norm)));
+        w.score = clamp(Math.round(45 * similarity(tokens[op.ti].norm, h.norm)));
         w.status = "mispronounced";
       }
     }
   } else {
     words.forEach((w, i) => {
-      w.score = clamp(Math.round(100 * (fit[i] ?? 0.75)));
-      w.status = statusFor(w.score, level);
+      const raw = Math.max(0, Math.min(1, fit[i] ?? 0.65));
+      w.score = clamp(Math.round(96 * Math.pow(raw, 1.4)));
+      w.status = statusFor(w.score);
     });
     understood = words.length;
   }
@@ -220,14 +273,31 @@ export function buildResult(
         w.score = 0;
         continue;
       }
-      const misheard = w.status === "mispronounced" && w.heard !== undefined;
+      if ((w.start === undefined || w.end === undefined) && a.start !== undefined && a.end !== undefined) {
+        w.start = a.start;
+        w.end = a.end;
+      }
+      let misheard = w.status === "mispronounced" && w.heard !== undefined;
+      // The open recogniser can mishear short or rare words that were said correctly. When Azure,
+      // which checks the expected sounds one by one, finds no error and a clear score, trust it.
+      if (misheard && a.errorType === "None" && a.score >= SCORE_SCALE.clear) {
+        misheard = false;
+        w.heard = undefined;
+        understood++;
+      }
       w.score = Math.round(misheard ? Math.min(a.score, 59) : a.score);
       w.status =
-        a.errorType === "Mispronunciation" && w.score < LEVELS[level].clear
+        a.errorType === "Mispronunciation" && w.score < SCORE_SCALE.clear
           ? "mispronounced"
-          : statusFor(w.score, level);
+          : statusFor(w.score);
       if (a.phonemes.length) {
-        w.phonemes = a.phonemes.map((p) => ({ ipa: p.ipa, score: Math.round(p.score) }));
+        w.phonemes = a.phonemes.map((p) => ({
+          ipa: p.ipa,
+          score: Math.round(p.score),
+          // Azure's top guess can differ on a sound that was fine, so only name it when the sound scored low.
+          ...(p.heard && p.score < SCORE_SCALE.clear ? { heardIpa: p.heard } : {}),
+        }));
+        w.phonemesMeasured = true;
         phonemeLevel = true;
       }
     }
@@ -252,24 +322,24 @@ export function buildResult(
 
       if (ai.errorType === "Omission" && w.status === "omitted") {
         w.score = 0;
-      } else if (w.status === "omitted" && ai.score >= 60) {
+      } else if (w.status === "omitted" && ai.errorType !== "Omission" && ai.score >= 50) {
         // OpenAI heard the word clearly even though STT missed it
         w.score = ai.score;
-        w.status = statusFor(w.score, level);
+        w.status = statusFor(w.score);
         understood++;
       } else {
         const sttMisheard = w.status === "mispronounced" && w.heard !== undefined;
         const blended = azure
           ? Math.round(w.score * 0.55 + ai.score * 0.45)
-          : Math.round(w.score * 0.35 + ai.score * 0.65);
-        w.score = sttMisheard ? Math.min(blended, 64) : clamp(blended);
+          : Math.round(w.score * 0.15 + ai.score * 0.85);
+        w.score = sttMisheard ? Math.min(blended, 52) : clamp(blended);
         w.status =
           (ai.errorType === "Mispronunciation" || ai.errorType === "ConsonantSubstitution" || sttMisheard) &&
-          w.score < LEVELS[level].clear
-            ? w.score < LEVELS[level].unclear
+          w.score < SCORE_SCALE.clear
+            ? w.score < SCORE_SCALE.unclear
               ? "mispronounced"
               : "unclear"
-            : statusFor(w.score, level);
+            : statusFor(w.score);
       }
 
       if (ai.expectedIpa) w.expectedIpa = ai.expectedIpa;
@@ -284,6 +354,7 @@ export function buildResult(
 
       if (ai.phonemes.length > 0 && (!w.phonemes || !w.phonemes.length)) {
         w.phonemes = ai.phonemes;
+        w.phonemesMeasured = true;
         phonemeLevel = true;
       } else if (ai.phonemes.length > 0 && w.phonemes && w.phonemes.length > 0) {
         // Enrich Azure phonemes with OpenAI's heardIpa / issue / tip diagnostics.
@@ -303,25 +374,55 @@ export function buildResult(
 
   // 5. Enrich every word with phoneme-level breakdown and articulatory diagnosis so
   //    detailed feedback is always present even without external phoneme APIs.
-  words.forEach((w, i) => {
-    enrichWordDiagnostics(w, lang, { faLoss: faLosses[i] });
-    if (w.phonemes && w.phonemes.length > 0) {
-      phonemeLevel = true;
-    }
-  });
+  //    Sounds added here are the expected sounds only; they carry no measurement of their own.
+  words.forEach((w, i) => enrichWordDiagnostics(w, lang, { faLoss: faLosses[i] }));
+  const depth: CheckDepth = phonemeLevel ? "sound" : azure || openai ? "word" : "basic";
 
   const focusSounds = extractFocusSounds(words, lang);
   const total = Math.max(1, words.length);
+  const claritySum = words.reduce((sum, w) => {
+    if (w.status === "omitted") return sum;
+    if (w.heard !== undefined && w.score < 60) return sum + 0.25;
+    if (w.score >= 78) return sum + 1;
+    if (w.score >= 60) return sum + 0.72;
+    if (w.score >= 40) return sum + 0.42;
+    return sum + 0.15;
+  }, 0);
+  // Nothing recognisable at all: ask for another take rather than scoring silence or noise.
+  const azureHeard = azure?.words.some((w) => w.errorType !== "Omission" && w.score > 0) ?? false;
+  // The audio model is not consulted here: in calibration it reported words in pure silence.
+  if (stt && heardTokens(stt, lang).length === 0 && !azureHeard) {
+    throw new NoSpeechError();
+  }
+  // Open recognition is unreliable on very short clips, so it does not cap intelligibility there;
+  // the per-word clarity below still reflects any word it misheard.
+  const shortClip = duration < 1.5 || tokens.length === 1;
+  const sttCap = stt && !shortClip ? Math.round((understood / total) * 100) : 100;
+  const intelligibility = clamp(Math.min(sttCap, Math.round((claritySum / total) * 100)));
+  // Re-anchor scores on what native speakers reach in this language (intelligibility above keeps the
+  // raw scores: it is about being understood, not about accent). Only engine-scored words are calibrated.
+  // SCORE_RAW=1 keeps raw engine scores, for the calibration scripts that measure the native range.
+  if (azure && process.env.SCORE_RAW !== "1") {
+    for (const w of words) {
+      if (w.status === "omitted") continue;
+      w.score = toNativeScale(w.score, lang);
+      w.status = w.status === "mispronounced" ? "mispronounced" : statusFor(w.score);
+      if (w.phonemesMeasured && w.phonemes) {
+        w.phonemes = w.phonemes.map((p) => ({ ...p, score: toNativeScale(p.score, lang) }));
+      }
+    }
+  }
   return {
     engines: { elevenlabs: hasElevenLabs(), azure: hasAzure() || hasOpenAi(), openai: hasOpenAi() },
     demo: false,
     phonemeLevel,
+    depth,
     transcript: stt?.text ?? "",
     words,
     insertions,
     scores: {
       accuracy: Math.round(mean(words.map((w) => w.score))),
-      intelligibility: clamp(Math.round((understood / total) * 100)),
+      intelligibility,
       completeness: Math.round((words.filter((w) => w.status !== "omitted").length / total) * 100),
     },
     duration,
@@ -335,51 +436,81 @@ export async function assess(
   wav: Blob,
   text: string,
   lang: string,
-  level: LevelId,
   duration: number,
   phonemes: boolean,
 ): Promise<AssessResult> {
   const warnings: string[] = [];
   const locale = getLanguage(lang).azure;
   const useAzure = phonemes && hasAzure() && !!locale;
+  // Where Azure scores, the audio model is opt-in (SCORE_WITH_OPENAI=1). Calibration showed that
+  // blending it in lowered native scores about as much as accented ones, added timeouts and
+  // invented words in silence, so it did not separate accents better than Azure alone.
+  const useOpenAi = hasOpenAi() && (!useAzure || process.env.SCORE_WITH_OPENAI === "1");
 
-  // Run fast, native acoustic models in parallel (~1s):
-  // - ElevenLabs forced alignment + Scribe v2 transcription (with native `language_code`)
-  // - Azure Pronunciation Assessment (with native BCP-47 locale acoustic model)
-  const [fa, stt, azure] = await Promise.allSettled([
+  // A brief outage or rate limit should not silently drop the main pronunciation scorer: retry once.
+  const azureWithRetry = async (azureLocale: string) => {
+    try {
+      return await assessWithAzure(wav, text, azureLocale);
+    } catch (err) {
+      console.error("azure assessment failed, retrying", err);
+      await new Promise((r) => setTimeout(r, 600));
+      return assessWithAzure(wav, text, azureLocale);
+    }
+  };
+
+  // Run acoustic alignment/transcription and multimodal phonetic diagnosis in parallel.
+  const [fa, stt, azure, openaiParallel] = await Promise.allSettled([
     forcedAlign(wav, text),
     transcribe(wav, lang),
-    useAzure ? assessWithAzure(wav, text, locale) : Promise.resolve(undefined),
+    useAzure && locale ? azureWithRetry(locale) : Promise.resolve(undefined),
+    useOpenAi ? assessWithOpenAi(wav, text, lang) : Promise.resolve(undefined),
   ]);
 
-  // Only fall back to OpenAI audio assessment when primary acoustic models fail.
-  let openaiResult: OpenAiAssessment | undefined;
-  if (fa.status === "rejected" && stt.status === "rejected" && hasOpenAi()) {
+  const azureResult = azure.status === "fulfilled" ? azure.value : undefined;
+  let openaiResult: OpenAiAssessment | undefined =
+    openaiParallel.status === "fulfilled" ? openaiParallel.value : undefined;
+  // Without Azure, alignment fit alone scores even native speech far too low, so bring in the
+  // OpenAI assessment as the stand-in scorer when Azure was expected but did not answer.
+  if (useAzure && !azureResult && !openaiResult && hasOpenAi()) {
     try {
-      openaiResult = await assessWithOpenAi(wav, text, lang, level);
+      openaiResult = await assessWithOpenAi(wav, text, lang);
+    } catch (err) {
+      console.error("openai stand-in assessment failed", err);
+    }
+  }
+  const degraded = (useAzure && !azureResult) || (useOpenAi && !openaiResult);
+  if (
+    fa.status === "rejected" &&
+    stt.status === "rejected" &&
+    !azureResult &&
+    !useOpenAi &&
+    !openaiResult &&
+    hasOpenAi()
+  ) {
+    try {
+      openaiResult = await assessWithOpenAi(wav, text, lang);
     } catch (err) {
       console.error("openai fallback assessment failed", err);
     }
   }
 
-  if (fa.status === "rejected" && stt.status === "rejected" && !openaiResult) {
+  if (fa.status === "rejected" && stt.status === "rejected" && !openaiResult && !azureResult) {
     throw new Error(String(stt.reason?.message ?? stt.reason));
   }
-  for (const r of [fa, stt, azure]) {
+  for (const r of [fa, stt, azure, openaiParallel]) {
     if (r.status === "rejected") console.error("assessment engine failed", r.reason);
   }
-  if ((fa.status === "rejected" || stt.status === "rejected") && !openaiResult) {
+  if (((fa.status === "rejected" || stt.status === "rejected") && !openaiResult && !azureResult) || degraded) {
     warnings.push("Part of the analysis was unavailable just now, so some scores may be less detailed than usual.");
   }
   return buildResult(
     text,
     lang,
-    level,
     duration,
     {
       fa: fa.status === "fulfilled" ? fa.value : undefined,
       stt: stt.status === "fulfilled" ? stt.value : undefined,
-      azure: azure.status === "fulfilled" ? azure.value : undefined,
+      azure: azureResult,
       openai: openaiResult,
     },
     warnings,
@@ -387,7 +518,7 @@ export async function assess(
 }
 
 /** Simulated result so the interface can be explored before any API key is set. */
-export function demoResult(text: string, lang: string, level: LevelId, duration: number): AssessResult {
+export function demoResult(text: string, lang: string, duration: number): AssessResult {
   const tokens: Token[] = tokenize(text, lang);
   let seed = 0;
   for (const ch of text) seed = (seed * 31 + ch.codePointAt(0)!) >>> 0;
@@ -413,7 +544,7 @@ export function demoResult(text: string, lang: string, level: LevelId, duration:
       start,
       end: start + len * 0.85,
       score,
-      status: statusFor(score, level),
+      status: statusFor(score),
     };
     return enrichWordDiagnostics(w, lang);
   });
@@ -421,7 +552,8 @@ export function demoResult(text: string, lang: string, level: LevelId, duration:
   return {
     engines: { elevenlabs: false, azure: false, openai: false },
     demo: true,
-    phonemeLevel: true,
+    phonemeLevel: false,
+    depth: "basic",
     transcript: "",
     words,
     insertions: [],
