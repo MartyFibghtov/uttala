@@ -62,14 +62,23 @@ test("free: sign up, onboard (English, intermediate), practise the built-in sent
   expect(body.demo).toBe(false);
   expect(body.engines.elevenlabs).toBe(true);
   expect(body.words.length).toBeGreaterThan(2);
-  const ok = body.words.filter((w: { status: string }) => w.status === "ok").length;
-  console.log(`words clear: ${ok}/${body.words.length}`, JSON.stringify(body.words.map((w: { text: string; status: string; score: number }) => `${w.text}:${w.status}:${w.score}`)));
-  expect(ok / body.words.length).toBeGreaterThan(0.5);
-  expect(body.scores.accuracy).toBeGreaterThan(60);
+  console.log("UI take words:", JSON.stringify(body.words.map((w: { text: string; status: string; score: number }) => `${w.text}:${w.status}:${w.score}`)));
   await expect(chips(page).first()).toBeVisible({ timeout: 20_000 });
   expect(await chips(page).count()).toBe(body.words.length);
   await expect(page.getByRole("button", { name: /Try again/ })).toBeVisible();
   expect(c.errors.filter((e) => !/Failed to load resource/.test(e)), c.errors.join("\n")).toEqual([]);
+
+  // Scoring quality, on the exact clean native recording. Chrome's fake microphone loops the WAV, so the UI take
+  // above can start mid-sentence (more so against a remote server); it proves the flow, not the score.
+  const direct = await page.request.post("/api/assess", {
+    multipart: { text: meta.sentence, lang: "en", level: "intermediate", audio: { name: "a.wav", mimeType: "audio/wav", buffer: wav() } },
+  });
+  expect(direct.status()).toBe(200);
+  const d = await direct.json();
+  const ok = d.words.filter((w: { status: string }) => w.status === "ok").length;
+  console.log(`native words clear: ${ok}/${d.words.length}`, JSON.stringify(d.words.map((w: { text: string; status: string; score: number }) => `${w.text}:${w.status}:${w.score}`)));
+  expect(ok / d.words.length).toBeGreaterThan(0.5);
+  expect(d.scores.accuracy).toBeGreaterThan(70);
 });
 
 test("drills page loads", async ({ page }) => {

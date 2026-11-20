@@ -17,6 +17,11 @@ type Loaded = {
 
 let loading: Promise<Loaded> | null = null;
 
+function modelThreads(): number {
+  const n = Number(process.env.SOUND_MODEL_THREADS);
+  return Number.isInteger(n) && n > 0 ? n : 2;
+}
+
 async function load(): Promise<Loaded> {
   const { AutoFeatureExtractor, AutoModelForCTC, env } = await import("@huggingface/transformers");
   const dir = process.env.SOUND_MODEL_DIR?.trim() || join(process.cwd(), ".data", "models");
@@ -35,7 +40,12 @@ async function load(): Promise<Loaded> {
   }
   const [fe, model] = await Promise.all([
     AutoFeatureExtractor.from_pretrained(PHONE_MODEL),
-    AutoModelForCTC.from_pretrained(PHONE_MODEL, { dtype: "q4" }),
+    // onnxruntime defaults to one thread per host core; in a container capped at a few vCPUs that oversubscribes
+    // the quota and slows inference several times. SOUND_MODEL_THREADS overrides (default 2).
+    AutoModelForCTC.from_pretrained(PHONE_MODEL, {
+      dtype: "q4",
+      session_options: { intraOpNumThreads: modelThreads(), interOpNumThreads: 1 },
+    }),
   ]);
   const tokens: string[] = [];
   for (const [k, v] of Object.entries(vocab)) tokens[v] = k;

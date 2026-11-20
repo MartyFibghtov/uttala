@@ -6,7 +6,9 @@ import { LIVE_KEYS, readDotenv } from "./e2e/live/env";
  * Live smoke test: the real ElevenLabs, OpenAI and Azure Speech engines (keys read from .env.local at run time).
  * Stripe and Resend stay on the local mock. Run with `pnpm e2e:live` (uses the existing .next build; set E2E_LIVE_BUILD=1 to rebuild).
  */
-const APP = "http://localhost:3200";
+/** E2E_TARGET=https://… runs the real-engine tests against a deployed site (skip the mock-checkout Pro test there). */
+const TARGET = process.env.E2E_TARGET?.replace(/\/$/, "");
+const APP = TARGET ?? "http://localhost:3200";
 const MOCK = "http://127.0.0.1:12111";
 export const LIVE_WAV = path.resolve(__dirname, "e2e/.tmp/live-speech.wav");
 
@@ -65,7 +67,7 @@ export default defineConfig({
     },
   },
   projects: [{ name: "live", use: { ...devices["Desktop Chrome"] } }],
-  webServer: [
+  webServer: TARGET ? [] : [
     {
       command: "node e2e/mock-server.ts",
       url: `${MOCK}/__mock/health`,

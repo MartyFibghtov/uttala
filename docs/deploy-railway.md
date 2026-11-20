@@ -22,10 +22,24 @@ Each rated recording makes two inferences (the learner and the reference), so ab
 - The Hobby plan allows up to 8 GB RAM and 8 vCPU per service (Pro: more; confirm on railway.com/pricing), which is plenty. You pay for what is used, so a warm 1 GB process costs roughly $10 per month of memory at Railway's per-GB-month rate; CPU is billed by use.
 - This is the main cost driver of the app. If it grows, move to the Pro plan or raise the per-service limits before adding replicas (SQLite on a volume needs a single instance).
 
+## Current staging deployment (set up 2026-11-20)
+
+The project `sayclear` already exists in the Railway workspace and runs in **US East (iad)**. That is close to the ElevenLabs and OpenAI APIs that dominate analysis time. To move to Europe, change the region in the service Settings in the dashboard, which migrates the volume with it. Changing only `region` in `.railway/railway.ts` does not move the volume, and the deploy then fails.
+
+- Web service `sayclear` at https://sayclear-production.up.railway.app, with a 5 GB volume at `/data`, healthcheck `/api/health`, restart on failure.
+- Cron service `reminders-cron` (curl image), `0 16 * * *`, calling `/api/cron/reminders` over the private network.
+- Stripe is in **test mode** (sandbox key, test webhook to this URL). Verified with `E2E_TARGET=https://sayclear-production.up.railway.app pnpm e2e:stripe`.
+
+Service settings live in `.railway/railway.ts` (Railway Infrastructure as Code). Change them there, preview with `railway config plan`, apply with `railway config apply`. Deploy new code with `railway up --service sayclear` (or connect the GitHub repo under the service's Settings > Source). Variables are not in the file (`preserve()`): set them with `railway variables --set KEY=value` or in the dashboard.
+
+**To go live on this project:** set your domain (section 4), then replace `STRIPE_SECRET_KEY` with the live key, run `pnpm stripe:setup --webhook https://your.domain` with the live key, and set the printed `STRIPE_WEBHOOK_SECRET` and `STRIPE_PORTAL_CONFIGURATION`. Update `BETTER_AUTH_URL` and `NEXT_PUBLIC_SITE_URL` to the domain and redeploy (the site URL is baked in at build time). Add `RESEND_API_KEY`, `EMAIL_FROM`, `NEXT_PUBLIC_CONTACT_EMAIL` and `NEXT_PUBLIC_COMPANY_NAME`.
+
+The rest of this guide describes setting up a project from scratch.
+
 ## 1. Create the project
 
 1. Push the repository to GitHub.
-2. In Railway: **New Project > Deploy from GitHub repo**, pick the repository. Railway detects the `Dockerfile` and uses it. Do not add a `railway.json`.
+2. In Railway: **New Project > Deploy from GitHub repo**, pick the repository. Railway detects the `Dockerfile` and uses it. Service settings are kept in `.railway/railway.ts` (see above); `railway.json` is deprecated by Railway.
 3. Open the service **Settings** tab:
    - **Networking > Generate Domain** (gives `<name>.up.railway.app`; add your own domain in step 4).
    - **Deploy > Healthcheck Path**: `/api/health`

@@ -19,3 +19,4 @@ npm-debug.log*
 Dockerfile
 .dockerignore
 playwright*.config.ts
+.railway

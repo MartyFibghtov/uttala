@@ -8,7 +8,9 @@ import { readDotenv } from "./e2e/live/env";
  * STRIPE_SECRET_KEY=sk_test_… and STRIPE_PORTAL_CONFIGURATION (from `pnpm stripe:setup`), plus the Stripe CLI.
  * Engines and email stay on the local mock. Run with `pnpm e2e:stripe` (uses the existing build).
  */
-const APP = "http://localhost:3300";
+/** E2E_TARGET=https://… runs the same test against a deployed site; Stripe then sends webhooks to it directly. */
+const TARGET = process.env.E2E_TARGET?.replace(/\/$/, "");
+const APP = TARGET ?? "http://localhost:3300";
 const MOCK = "http://127.0.0.1:12111";
 const dotenv = readDotenv();
 
@@ -43,7 +45,7 @@ delete process.env.STRIPE_API_BASE;
 export default defineConfig({
   testDir: "./e2e/stripe",
   testMatch: /.*\.spec\.ts/,
-  globalSetup: "./e2e/stripe/global-setup.ts",
+  globalSetup: TARGET ? undefined : "./e2e/stripe/global-setup.ts",
   timeout: 180_000,
   expect: { timeout: 30_000 },
   workers: 1,
@@ -51,7 +53,7 @@ export default defineConfig({
   outputDir: "e2e/.results-stripe",
   use: { baseURL: APP, trace: "retain-on-failure", screenshot: "only-on-failure", channel: process.env.E2E_CHANNEL ?? "chrome" },
   projects: [{ name: "stripe", use: { ...devices["Desktop Chrome"] } }],
-  webServer: [
+  webServer: TARGET ? [] : [
     {
       command: "node e2e/mock-server.ts",
       url: `${MOCK}/__mock/health`,
