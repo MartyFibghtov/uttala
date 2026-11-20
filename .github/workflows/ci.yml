@@ -121,10 +121,13 @@ jobs:
           docker logs sayclear 2>&1 | tee /tmp/container.log
           grep -q '\[sound-model\] ready in' /tmp/container.log
           if grep -q 'Sound model failed to load' /tmp/container.log; then exit 1; fi
-      - name: Native bindings load inside /app
+      # Native bindings: pnpm keeps them out of /app/node_modules' top level, so test them through the app.
+      # onnxruntime-node is proven by "[sound-model] ready" above; libsql by the database query in /api/health.
+      - name: Database works inside the image
         run: |
-          docker exec -w /app sayclear node -e "require('onnxruntime-node'); console.log('onnxruntime-node ok')"
-          docker exec -w /app sayclear node -e "require('libsql'); console.log('libsql ok')"
+          body="$(curl -s http://localhost:3000/api/health)"
+          echo "$body"
+          [ "$body" = '{"ok":true}' ]
       - name: GET / returns 200
         run: |
           code="$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/)"
