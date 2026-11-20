@@ -15,7 +15,30 @@ const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.l
  * losses typically sit around 0.25–0.70, so we shift and soften the decay curve.
  */
 const FIT_SCALE = Number(process.env.ALIGNMENT_LOSS_SCALE ?? 0.75);
+/** Forced-alignment fit below which the alignment engine independently doubts a word (native speech stays above ~0.62). */
+const LLM_CORROBORATION_FIT = 0.55;
 const fitFromLoss = (loss: number) => Math.min(1, Math.exp(-Math.max(0, loss - 0.25) * FIT_SCALE));
+
+/**
+ * The audio model sometimes answers in prose ("I can't listen to audio") instead of JSON, or returns
+ * no words. That is a refusal, not a verdict, so ask once more before giving up on it.
+ */
+async function assessWithOpenAiRetry(wav: Blob, text: string, lang: string): Promise<OpenAiAssessment> {
+  const unusable = (r: OpenAiAssessment) => r.words.length === 0;
+  try {
+    const first = await assessWithOpenAi(wav, text, lang);
+    if (!unusable(first)) return first;
+  } catch (err) {
+    if (!(err instanceof SyntaxError)) throw err;
+  }
+  return assessWithOpenAi(wav, text, lang);
+}
+
+/**
+ * Forced-alignment fit below which alignment alone doubts a word. Native speech from four stock
+ * voices never fit below 0.46 (and mostly above 0.6), so only a clearly worse fit counts.
+ */
+const ALIGNMENT_DOUBT_FIT = 0.35;
 
 /** No speech was recognised in the recording, so there is nothing fair to score. */
 export class NoSpeechError extends Error {
@@ -320,6 +343,7 @@ export function buildResult(
       const w = words[op.ti];
       if (!ai || !w) continue;
 
+      let suppressed = false;
       if (ai.errorType === "Omission" && w.status === "omitted") {
         w.score = 0;
       } else if (w.status === "omitted" && ai.errorType !== "Omission" && ai.score >= 50) {
@@ -329,9 +353,23 @@ export function buildResult(
         understood++;
       } else {
         const sttMisheard = w.status === "mispronounced" && w.heard !== undefined;
-        const blended = azure
+        let blended = azure
           ? Math.round(w.score * 0.55 + ai.score * 0.45)
           : Math.round(w.score * 0.15 + ai.score * 0.85);
+        // The audio model judges by expectation, not by ear: on clean native speech it reports the
+        // same "th became t/s" substitution it reports for a real one (measured, scripts in
+        // .data/measure), so its verdict alone cannot separate them. Without a second signal
+        // (recogniser heard another word, forced alignment fits badly, or the word is missing) it
+        // may refine a score but not push a word below clear.
+        const corroborated =
+          sttMisheard ||
+          ai.errorType === "Omission" ||
+          (fit[op.ti] !== undefined && (fit[op.ti] as number) < LLM_CORROBORATION_FIT);
+        const uncorroborated = !azure && !corroborated && blended < SCORE_SCALE.clear;
+        if (uncorroborated) {
+          blended = SCORE_SCALE.clear;
+          suppressed = true;
+        }
         w.score = sttMisheard ? Math.min(blended, 52) : clamp(blended);
         w.status =
           (ai.errorType === "Mispronunciation" || ai.errorType === "ConsonantSubstitution" || sttMisheard) &&
@@ -342,6 +380,8 @@ export function buildResult(
             : statusFor(w.score);
       }
 
+      // Unconfirmed audio-model complaints are not shown as findings on a word that scored clear.
+      if (suppressed) continue;
       if (ai.expectedIpa) w.expectedIpa = ai.expectedIpa;
       if (ai.heardIpa) w.heardIpa = ai.heardIpa;
       if (!w.heard && ai.heard && normalize(ai.heard, lang) !== tokens[op.ti].norm) {
@@ -370,6 +410,19 @@ export function buildResult(
         phonemeLevel = true;
       }
     }
+  }
+
+  // Alignment fit alone is a poor judge of native speech (it flags most native words as unclear), so
+  // with no sound engine to confirm it, fit may not push a recognised word below clear unless it is
+  // extremely low. A word the recogniser heard wrongly or missed is already marked above.
+  if (!azure && !(openai && openai.words.length > 0)) {
+    words.forEach((w, i) => {
+      if (w.status === "omitted" || w.status === "ok" || w.heard !== undefined) return;
+      const f = fit[i];
+      if (f !== undefined && f < ALIGNMENT_DOUBT_FIT) return;
+      w.score = SCORE_SCALE.clear;
+      w.status = "ok";
+    });
   }
 
   // 5. Enrich every word with phoneme-level breakdown and articulatory diagnosis so
@@ -405,10 +458,10 @@ export function buildResult(
   if (azure && process.env.SCORE_RAW !== "1") {
     for (const w of words) {
       if (w.status === "omitted") continue;
-      w.score = toNativeScale(w.score, lang);
+      w.score = toNativeScale(w.score, lang, w.text);
       w.status = w.status === "mispronounced" ? "mispronounced" : statusFor(w.score);
       if (w.phonemesMeasured && w.phonemes) {
-        w.phonemes = w.phonemes.map((p) => ({ ...p, score: toNativeScale(p.score, lang) }));
+        w.phonemes = w.phonemes.map((p) => ({ ...p, score: toNativeScale(p.score, lang, w.text) }));
       }
     }
   }
@@ -463,7 +516,7 @@ export async function assess(
     forcedAlign(wav, text),
     transcribe(wav, lang),
     useAzure && locale ? azureWithRetry(locale) : Promise.resolve(undefined),
-    useOpenAi ? assessWithOpenAi(wav, text, lang) : Promise.resolve(undefined),
+    useOpenAi ? assessWithOpenAiRetry(wav, text, lang) : Promise.resolve(undefined),
   ]);
 
   const azureResult = azure.status === "fulfilled" ? azure.value : undefined;
@@ -473,7 +526,7 @@ export async function assess(
   // OpenAI assessment as the stand-in scorer when Azure was expected but did not answer.
   if (useAzure && !azureResult && !openaiResult && hasOpenAi()) {
     try {
-      openaiResult = await assessWithOpenAi(wav, text, lang);
+      openaiResult = await assessWithOpenAiRetry(wav, text, lang);
     } catch (err) {
       console.error("openai stand-in assessment failed", err);
     }
@@ -488,7 +541,7 @@ export async function assess(
     hasOpenAi()
   ) {
     try {
-      openaiResult = await assessWithOpenAi(wav, text, lang);
+      openaiResult = await assessWithOpenAiRetry(wav, text, lang);
     } catch (err) {
       console.error("openai fallback assessment failed", err);
     }
