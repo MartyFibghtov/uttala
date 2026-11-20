@@ -73,7 +73,8 @@ export default defineConfig({
       env: { MOCK_APP_URL: APP, STRIPE_WEBHOOK_SECRET: env.STRIPE_WEBHOOK_SECRET },
     },
     {
-      command: `rm -f .data/e2e.db* && ${build}pnpm start:standalone`,
+      command: `rm -f .data/e2e.db* && ${build}node scripts/start-standalone.mjs`,
+      gracefulShutdown: { signal: "SIGTERM", timeout: 5_000 },
       url: `${APP}/pricing`,
       timeout: 600_000,
       reuseExistingServer: !!process.env.E2E_REUSE,

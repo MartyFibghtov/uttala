@@ -1,6 +1,6 @@
 // Run the standalone server: copy static assets and public files next to it (as the Dockerfile does), then start.
 import { cpSync, existsSync } from "node:fs";
-import { spawn } from "node:child_process";
+import { resolve } from "node:path";
 
 if (!existsSync(".next/standalone/server.js")) {
   console.error("No standalone build found. Run `pnpm build` first.");
@@ -8,6 +8,7 @@ if (!existsSync(".next/standalone/server.js")) {
 }
 cpSync(".next/static", ".next/standalone/.next/static", { recursive: true });
 if (existsSync("public")) cpSync("public", ".next/standalone/public", { recursive: true });
-const child = spawn(process.execPath, [".next/standalone/server.js"], { stdio: "inherit", env: { HOSTNAME: "0.0.0.0", ...process.env } });
-child.on("exit", (code) => process.exit(code ?? 0));
-for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => child.kill(sig));
+process.env.HOSTNAME ??= "0.0.0.0";
+// Run the server in this process (no child), so a stop signal reaches it and nothing is left behind.
+for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => process.exit(0));
+await import(resolve(".next/standalone/server.js"));
