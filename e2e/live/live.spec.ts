@@ -70,10 +70,12 @@ test("free: sign up, onboard (English, intermediate), practise the built-in sent
 
   // Scoring quality, on the exact clean native recording. Chrome's fake microphone loops the WAV, so the UI take
   // above can start mid-sentence (more so against a remote server); it proves the flow, not the score.
+  const td = Date.now();
   const direct = await page.request.post("/api/assess", {
     multipart: { text: meta.sentence, lang: "en", level: "intermediate", audio: { name: "a.wav", mimeType: "audio/wav", buffer: wav() } },
   });
   expect(direct.status()).toBe(200);
+  note("assess (api, clean wav)", Date.now() - td);
   const d = await direct.json();
   const ok = d.words.filter((w: { status: string }) => w.status === "ok").length;
   console.log(`native words clear: ${ok}/${d.words.length}`, JSON.stringify(d.words.map((w: { text: string; status: string; score: number }) => `${w.text}:${w.status}:${w.score}`)));
