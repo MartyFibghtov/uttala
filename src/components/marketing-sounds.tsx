@@ -5,7 +5,7 @@ import { Hero, languageSlug } from "@/components/marketing-pages";
 import { Button } from "@/components/ui/button";
 import { type Language } from "@/lib/languages";
 import { MINIMAL_PAIRS } from "@/lib/minimal-pairs";
-import { clip } from "@/lib/site";
+import { TITLE_MAX, clip } from "@/lib/site";
 import { KIND_LABEL, soundSlug, soundsFor, type Sound, type SoundKind } from "@/lib/sounds";
 
 export const soundPath = (language: Language, sound: Sound) => `/languages/${languageSlug(language)}/sounds/${soundSlug(sound)}`;
@@ -31,7 +31,11 @@ function titleSymbol(sound: Sound): string | null {
 
 export function soundTitle(sound: Sound, language: Language): string {
   const symbol = titleSymbol(sound);
-  return `How to pronounce the ${subject(sound, language)}${symbol ? ` (${symbol})` : ""}`;
+  const s = subject(sound, language);
+  // Longest form that still fits next to the brand suffix; the generator in pageMetadata clips as a last resort.
+  const budget = TITLE_MAX - " · SayClear".length;
+  const options = [`How to pronounce the ${s}${symbol ? ` (${symbol})` : ""}`, `How to pronounce the ${s}`, `How to pronounce ${s}`, `${s} pronunciation`];
+  return options.find((o) => o.length <= budget) ?? options[options.length - 1];
 }
 
 export function soundDescription(sound: Sound): string {
@@ -39,7 +43,7 @@ export function soundDescription(sound: Sound): string {
 }
 
 export function hubTitle(language: Language): string {
-  return `${language.name} sounds: ${soundsFor(language.code).length} pronunciation guides with practice words`;
+  return `${language.name} sounds: pronunciation guides`;
 }
 
 export function hubDescription(language: Language): string {

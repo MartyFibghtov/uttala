@@ -3,7 +3,7 @@ import { Pricing } from "@/components/pricing";
 import { pageMetadata } from "@/lib/site";
 
 export const metadata: Metadata = pageMetadata({
-  title: "Pricing: start free, upgrade for more practice",
+  title: "Pricing: start free, upgrade anytime",
   description: "Start free with five analysed recordings a day. Upgrade for more practice, rhythm and melody feedback, and sound-by-sound scoring.",
   path: "/pricing",
 });

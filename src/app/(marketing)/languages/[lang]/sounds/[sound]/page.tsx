@@ -28,7 +28,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const found = await resolve(params);
   if (!found) return {};
   const { language, sound } = found;
-  return pageMetadata({ title: soundTitle(sound, language), description: soundDescription(sound), path: soundPath(language, sound) });
+  return pageMetadata({ title: soundTitle(sound, language), description: soundDescription(sound), path: soundPath(language, sound), ownImage: true });
 }
 
 export default async function Page({ params }: Props) {

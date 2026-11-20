@@ -10,7 +10,7 @@ import "./globals.css";
 const inter = Inter({ variable: "--font-inter", subsets: ["latin", "latin-ext", "cyrillic"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
-const TITLE = `${SITE.name}: Pronunciation practice with feedback in ${LANGUAGES.length} languages`;
+const TITLE = `${SITE.name}: Pronunciation practice in ${LANGUAGES.length} languages`;
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE.url),

@@ -16,7 +16,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
     entry("/method"),
     entry("/pricing"),
     entry("/help"),
-    entry("/sign-up"),
     entry("/terms", LEGAL_UPDATED),
     entry("/privacy", LEGAL_UPDATED),
     ...LANGUAGES.flatMap((l) => {

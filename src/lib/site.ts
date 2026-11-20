@@ -43,6 +43,9 @@ export const SITE = {
 
 export const absoluteUrl = (path: string) => `${SITE.url}${path === "/" ? "" : path}`;
 
+/** Longest page title that search results show without truncation. */
+export const TITLE_MAX = 60;
+
 /** Trim to a search-snippet length at a word boundary. */
 export function clip(text: string, max = 155): string {
   const clean = text.replace(/\s+/g, " ").trim();
@@ -61,20 +64,29 @@ export function pageMetadata({
   absoluteTitle,
   description,
   path,
+  ownImage,
 }: {
   title: string;
   /** Use the title as written, without the " · SayClear" suffix. */
   absoluteTitle?: boolean;
   description: string;
   path: string;
+  /** The route has its own opengraph-image file, which supplies og:image and twitter:image. */
+  ownImage?: boolean;
 }): Metadata {
-  const social = absoluteTitle ? title : `${title} · ${SITE.name}`;
+  // Keep the rendered title within TITLE_MAX: brand suffix if it fits, else the bare title, else clipped.
+  const suffixed = `${title} · ${SITE.name}`;
+  const useSuffix = !absoluteTitle && suffixed.length <= TITLE_MAX;
+  const social = useSuffix ? suffixed : clip(title, TITLE_MAX);
+  // An explicit images array replaces the file-based image inherited from the root, so pages without their own
+  // opengraph-image file point at the root image. Pages with their own file set ownImage to let it apply.
+  const images = ownImage ? undefined : [{ url: "/opengraph-image", width: 1200, height: 630, alt: SITE.name }];
   return {
-    title: absoluteTitle ? { absolute: title } : title,
+    title: useSuffix ? title : { absolute: social },
     description,
     alternates: { canonical: path },
-    openGraph: { title: social, description, url: path, siteName: SITE.name, type: "website" },
-    twitter: { card: "summary_large_image", title: social, description },
+    openGraph: { title: social, description, url: path, siteName: SITE.name, type: "website", ...(images && { images }) },
+    twitter: { card: "summary_large_image", title: social, description, ...(images && { images }) },
   };
 }
 

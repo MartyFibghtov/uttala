@@ -26,9 +26,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       ? "Practise Swedish uttal with feedback on every word: the sj-ljudet and tj-ljudet, retroflex rs, long and short vowels and pitch accent. Free to start."
       : `Practise ${language.name} pronunciation with word-by-word feedback on your own voice. Guides for ${sounds} and more, ear training and a phrasebook course.`;
   return pageMetadata({
-    title: `${language.name} pronunciation practice: sounds, drills and feedback`,
+    title: `${language.name} pronunciation practice`,
     description: clip(description, 160),
     path: `/languages/${languageSlug(language)}`,
+    ownImage: true,
   });
 }
 

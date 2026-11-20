@@ -6,10 +6,10 @@ import { PLANS } from "@/lib/plans";
 import { SITE, absoluteUrl, pageMetadata } from "@/lib/site";
 
 export const metadata: Metadata = pageMetadata({
-  title: `${SITE.name}: Pronunciation practice with feedback in ${LANGUAGES.length} languages`,
+  title: `${SITE.name}: Pronunciation practice in ${LANGUAGES.length} languages`,
   absoluteTitle: true,
   description:
-    "Read a sentence aloud and see which words a listener would miss. Word-by-word feedback, drills built from your mistakes and sound guides in 17 languages. Free to start.",
+    "Read a sentence aloud and see which words a listener would miss. Word-by-word feedback, drills from your mistakes and sound guides in 17 languages.",
   path: "/",
 });
 
