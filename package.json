@@ -11,6 +11,7 @@
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",
     "e2e:live": "playwright test -c playwright.live.config.ts",
+    "e2e:stripe": "playwright test -c playwright.stripe.config.ts",
     "stripe:setup": "node scripts/stripe-setup.mjs",
     "typecheck": "next typegen && tsc --noEmit",
     "calibrate": "npx -y tsx --tsconfig tsconfig.json scripts/calibrate.mts",

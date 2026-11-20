@@ -60,3 +60,13 @@ depend on the mock hooks and must not be run against live services.
 API keys read from `.env.local` at run time (never copied), real engine endpoints, and Stripe/Resend still on the local mock.
 Global setup makes one ElevenLabs TTS call and writes `e2e/.tmp/live-speech.wav` for Chrome's fake microphone. A run spends about 5 analyses.
 Uses the existing `.next` build; `E2E_LIVE_BUILD=1` rebuilds first.
+
+## Real Stripe (test mode)
+
+`pnpm e2e:stripe` runs `e2e/stripe/stripe.spec.ts` with `playwright.stripe.config.ts` against your Stripe sandbox. It needs
+`STRIPE_SECRET_KEY=sk_test_…`, `STRIPE_PORTAL_CONFIGURATION` and `STRIPE_WEBHOOK_SECRET` in `.env.local` (from `pnpm stripe:setup`
+and `stripe listen --print-secret`) and the Stripe CLI. The global setup starts `stripe listen` to forward real webhooks to the app on
+port 3300. The test pays on hosted Checkout with card 4242, checks the trial subscription in Stripe, opens the billing portal,
+switches to Pro and cancels through the Stripe API (as the portal would), waits for the app to follow each webhook, then deletes
+the account and checks the Stripe customer is gone. Engines and email stay on the mock. It does not use the shared fixture:
+Stripe blocks the fake `X-Forwarded-For` header that fixture adds.

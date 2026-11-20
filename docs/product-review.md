@@ -65,13 +65,14 @@ The 7-day trial is once per person; a hashed email blocks repeat trials after de
 ## Verification
 
 - 44 end-to-end tests pass on desktop and mobile against the production (standalone) server, with mocked Stripe, ElevenLabs, OpenAI and email and the real sound model. They cover marketing and SEO routes, sign-up and sign-in, password reset, practice, drills, the daily limit with its upgrade prompt, checkout → trial → Plus features → plan switch → cancel → delete, data export, unsubscribe, webhooks and security headers.
-- A live smoke test against the real ElevenLabs, OpenAI and Azure engines is in `e2e/live` (`pnpm e2e:live`).
-- The CI workflow builds and starts the Docker image (see `e2e/README.md`, CI section).
+- 6 live tests pass against the real ElevenLabs, OpenAI and Azure engines (`pnpm e2e:live`).
+- Real Stripe test mode passes end to end (`pnpm e2e:stripe`): hosted Checkout shows "7 days free, then SEK 99.00 per month" and SEK 0.00 due today, card 4242 starts a trialing Plus subscription, the webhook updates the app, the billing portal opens, switching to Pro and cancelling are reflected in the app, and deleting the account deletes the Stripe customer.
+- CI (GitHub Actions) is green: type check and lint, the full e2e suite, and a Docker job that builds the image, starts it, waits for `/api/health`, and confirms the 240 MB sound model loads inside the container (about 0.7 s).
 
 ## What the founder must do (cannot be done for you)
 
 1. **Keys and deploy:** follow `docs/deploy-railway.md` (environment variables, volume at `/data`, cron service, domain).
-2. **Stripe:** `stripe login`, then `pnpm stripe:setup` in a sandbox and then in live mode, following `docs/stripe-launch-checklist.md`. Turn on trial-ending reminder emails in the Dashboard, since this can't be done by API.
+2. **Stripe:** the sandbox is set up and tested. For launch, run `pnpm stripe:setup --webhook https://your.site` once with the live key, following `docs/stripe-launch-checklist.md`, and turn on trial-ending reminder emails in the Dashboard, since this can't be done by API.
 3. **Human sign-offs:**
    - Read the short list of Swedish items in `docs/content-review.md` (a fact-check against published sources is done).
    - Have the terms and privacy text reviewed.
