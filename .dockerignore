@@ -18,5 +18,4 @@ docs
 npm-debug.log*
 Dockerfile
 .dockerignore
-playwright.config.ts
-playwright.live.config.ts
+playwright*.config.ts
