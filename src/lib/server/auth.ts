@@ -59,6 +59,9 @@ function resolveSecret(): string {
   const secret = process.env.BETTER_AUTH_SECRET?.trim();
   if (secret) return secret;
   // A shared fallback would let anyone forge sessions, so production refuses to start without one.
+  // `next build` (e.g. inside the Docker image) has no runtime secrets; nothing is signed while prerendering,
+  // so a random throwaway value is safe there. The running server still refuses to start without one.
+  if (process.env.NEXT_PHASE === "phase-production-build") return crypto.randomUUID() + crypto.randomUUID();
   if (process.env.NODE_ENV === "production") {
     throw new Error("BETTER_AUTH_SECRET is not set. Generate one with `openssl rand -hex 32`.");
   }
