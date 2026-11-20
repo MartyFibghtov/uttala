@@ -1,19 +1,22 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
-import { loadReference } from "@/components/practice-session";
-import { useRecorder } from "@/hooks/use-recorder";
+import { loadReference, postAssess, UpgradeNeeded } from "@/components/practice-session";
+import { resetTimeLabel } from "@/lib/plans";
+import { UpgradeCard } from "@/components/pricing";
+import { useAccount } from "@/hooks/use-account";
+import { isSilent, recorderErrorMessage, SILENT_MESSAGE, useRecorder } from "@/hooks/use-recorder";
 import { decodeToMono16k, encodeWav, play, SAMPLE_RATE, trackPitch } from "@/lib/audio";
 import { deduct, type Deduction } from "@/lib/deductions";
 import { compareProsody } from "@/lib/prosody";
 import { LANGUAGES, textsFor } from "@/lib/languages";
 import type { SoundCheck } from "@/lib/phone-compare";
 import { bandFor } from "@/lib/score-bands";
-import { onModelProgress, preloadRatingModel, strictCheck } from "@/lib/rating";
+import { strictCheck } from "@/lib/rating";
 import { applySoundCheck, NATIVE_MATCH, type StrictCheck } from "@/lib/sound-check";
 import type { AssessResult } from "@/lib/types";
 
@@ -34,7 +37,7 @@ const tone = (s: number) =>
 
 /**
  * Demo page: record once, then see the engine score next to the engine plus the precise sound check,
- * word by word, to judge how much the on-device model adds.
+ * word by word, to judge how much the sound model adds.
  */
 export function SoundCheckLab() {
   const [lang, setLang] = useState("sv");
@@ -44,23 +47,15 @@ export function SoundCheckLab() {
   );
   const [text, setText] = useState("");
   const target = text.trim() || phrases[0]?.text || "";
-  const [model, setModel] = useState<"idle" | "loading" | "ready" | "error">("idle");
-  const [progress, setProgress] = useState(0);
+  const { me } = useAccount();
   const [busy, setBusy] = useState<string | null>(null);
   const [run, setRun] = useState<Run | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  const prepare = async () => {
-    setModel("loading");
-    try {
-      const off = onModelProgress((f) => setProgress(Math.round(f * 100)));
-      await preloadRatingModel().finally(off);
-      setModel("ready");
-    } catch (err) {
-      console.error(err);
-      setModel("error");
-    }
-  };
+  const [needsPlus, setNeedsPlus] = useState(false);
+  const outOfRecordings = me.usage.used >= me.usage.limit;
+  // Only free users on a billing-enabled site are offered Plus; everyone else gets a plain limit message.
+  const canUpsell = me.billing && me.plan === "free";
+  const limitMessage = `That's today's ${me.usage.limit} recordings used. They come back at ${resetTimeLabel()} your time.`;
 
   const analyse = async (blob: Blob) => {
     setError(null);
@@ -68,7 +63,8 @@ export function SoundCheckLab() {
     try {
       setBusy("Scoring with the engine…");
       const samples = await decodeToMono16k(blob);
-      if (samples.length < SAMPLE_RATE * 0.4) throw new Error("Too short. Try again.");
+      if (samples.length < SAMPLE_RATE * 0.4) throw new Error("Too short. Say the whole sentence, then press Stop.");
+      if (isSilent(samples)) throw new Error(SILENT_MESSAGE);
       const form = new FormData();
       form.append("audio", encodeWav(samples), "speech.wav");
       form.append("text", target);
@@ -76,12 +72,10 @@ export function SoundCheckLab() {
       form.append("level", "intermediate");
       const refPromise = loadReference(target, lang, "intermediate").catch(() => null);
       const t0 = performance.now();
-      const res = await fetch("/api/assess", { method: "POST", body: form });
-      const engine = (await res.json()) as AssessResult & { error?: string };
-      if (!res.ok) throw new Error(engine.error ?? "Assessment failed.");
+      const engine = await postAssess(form);
       const t1 = performance.now();
 
-      setBusy("Comparing every sound with the native reading (on this device)…");
+      setBusy("Checking your sounds…");
       const reference = await refPromise;
       let strict: StrictCheck | null = null;
       let checkError: string | undefined;
@@ -120,7 +114,9 @@ export function SoundCheckLab() {
         seconds: { engine: (t1 - t0) / 1000, check: (t2 - t1) / 1000 },
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (err instanceof UpgradeNeeded && err.reason === "limit" && canUpsell) setNeedsPlus(true);
+      else if (err instanceof UpgradeNeeded) setError(err.reason === "limit" ? limitMessage : "This needs a paid plan.");
+      else setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(null);
     }
@@ -132,7 +128,16 @@ export function SoundCheckLab() {
       const blob = await recorder.stop();
       if (blob) void analyse(blob);
     } else {
-      await recorder.start();
+      if (outOfRecordings) {
+        if (canUpsell) setNeedsPlus(true);
+        else setError(limitMessage);
+        return;
+      }
+      try {
+        await recorder.start();
+      } catch (err) {
+        setError(recorderErrorMessage(err));
+      }
     }
   };
 
@@ -141,33 +146,18 @@ export function SoundCheckLab() {
       <div>
         <h1 className="text-2xl font-semibold">Sound check lab</h1>
         <p className="text-muted-foreground text-sm">
-          One recording, five results: the engine alone, the engine plus the sound check, the strict on-device score, strict combined with the engine, and the score by deduction with every mistake listed. Demo only;
-          each recording uses one of today&apos;s analyses.
+          A free taster of how we score. Record one sentence and see the same recording scored several ways, word by
+          word, with every caught mistake listed. Nothing to download: the sound check runs on our server. Each
+          recording uses one of today&apos;s {me.usage.limit} analyses ({Math.max(0, me.usage.limit - me.usage.used)} left).
         </p>
+        <Button asChild variant="outline" size="sm" className="mt-3 rounded-full">
+          <Link href="/practice">Practise in the app</Link>
+        </Button>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>1. Sound model</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          {model === "ready" ? (
-            <p className="text-sm text-emerald-600">Loaded and cached in this browser.</p>
-          ) : (
-            <>
-              <Button onClick={prepare} disabled={model === "loading"}>
-                {model === "loading" ? `Downloading… ${progress}%` : "Load the model (about 240 MB, once)"}
-              </Button>
-              {model === "loading" && <Progress value={progress} />}
-              {model === "error" && <p className="text-sm text-red-600">Could not load the model. See the console.</p>}
-            </>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>2. What to say</CardTitle>
+          <CardTitle>1. What to say</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex flex-wrap gap-2">
@@ -199,7 +189,8 @@ export function SoundCheckLab() {
             ))}
           </select>
           <Textarea
-            placeholder="Or type your own text (needs Plus)"
+            placeholder={me.entitlements.customText ? "Or type your own text" : "Your own text is part of Plus. Pick a phrase above."}
+            disabled={!me.entitlements.customText}
             value={phrases.some((p) => p.text === text) ? "" : text}
             onChange={(e) => setText(e.target.value)}
           />
@@ -211,13 +202,25 @@ export function SoundCheckLab() {
             >
               Hear the native reading
             </Button>
-            <Button onClick={toggle} disabled={!!busy || model !== "ready"}>
+            <Button onClick={toggle} disabled={!!busy}>
               {recorder.recording ? `Stop (${recorder.seconds.toFixed(0)} s)` : "Record"}
             </Button>
           </div>
-          {model !== "ready" && <p className="text-muted-foreground text-xs">Load the model first.</p>}
           {busy && <p className="text-sm">{busy}</p>}
           {error && <p className="text-sm text-red-600">{error}</p>}
+          {needsPlus && (
+            <UpgradeCard
+              title="Today's recordings are used"
+              currentPlan={me.plan}
+              trialAvailable={me.trialAvailable}
+              onDismiss={() => setNeedsPlus(false)}
+            >
+              <p>
+                The free plan analyses {me.usage.limit} recordings a day. Yours come back at {resetTimeLabel()} your
+                time, and Plus allows 60 a day if you would like to practise more now.
+              </p>
+            </UpgradeCard>
+          )}
         </CardContent>
       </Card>
 
@@ -235,7 +238,7 @@ function Comparison({ run, lang }: { run: Run; lang: string }) {
     <>
       <Card>
         <CardHeader>
-          <CardTitle>3. Result</CardTitle>
+          <CardTitle>2. Result</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

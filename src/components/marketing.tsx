@@ -14,7 +14,7 @@ import {
   Mic,
   Users,
 } from "lucide-react";
-import { Logo } from "@/components/app-shell";
+import { Logo } from "@/components/logo";
 import { ARTWORKS, ArtworkFrame, type ArtworkName } from "@/components/artwork";
 import { Orb } from "@/components/orb";
 import { Pricing } from "@/components/pricing";
@@ -35,6 +35,9 @@ export function MarketingHeader() {
           </Button>
           <Button asChild variant="ghost" className="hidden rounded-full md:inline-flex">
             <Link href="/languages">Languages</Link>
+          </Button>
+          <Button asChild variant="ghost" className="hidden rounded-full lg:inline-flex">
+            <Link href="/languages#sound-guides">Sound guides</Link>
           </Button>
           <Button asChild variant="ghost" className="hidden rounded-full lg:inline-flex">
             <Link href="/method">Method</Link>
@@ -61,13 +64,14 @@ const FOOTER: { title: string; links: [string, string][] }[] = [
       ["Features", "/features"],
       ["Pricing", "/pricing"],
       ["Method", "/method"],
+      ["Sound guides", "/languages#sound-guides"],
       ["Start free", "/sign-up"],
     ],
   },
   {
     title: "Languages",
     links: [
-      ...LANGUAGES.slice(0, 5).map((l): [string, string] => [l.name, `/languages/${languageSlug(l)}`]),
+      ...LANGUAGES.map((l): [string, string] => [l.name, `/languages/${languageSlug(l)}`]),
       [`All ${LANGUAGES.length} languages`, "/languages"],
     ],
   },
@@ -85,7 +89,7 @@ const FOOTER: { title: string; links: [string, string][] }[] = [
 export function MarketingFooter() {
   return (
     <footer className="border-t">
-      <div className="mx-auto grid max-w-6xl gap-10 px-4 py-12 md:grid-cols-[minmax(0,1.4fr)_repeat(3,minmax(0,1fr))] md:px-8">
+      <div className="mx-auto grid max-w-6xl gap-10 px-4 py-12 md:grid-cols-[minmax(0,1.3fr)_repeat(3,minmax(0,1fr))] md:px-8">
         <div>
           <Logo />
           <p className="mt-3 max-w-xs text-sm text-muted-foreground">
@@ -97,8 +101,8 @@ export function MarketingFooter() {
         </div>
         {FOOTER.map((col) => (
           <nav key={col.title} aria-label={col.title}>
-            <h2 className="text-sm font-medium">{col.title}</h2>
-            <ul className="mt-3 space-y-2 text-sm text-muted-foreground">
+            <p className="text-sm font-medium">{col.title}</p>
+            <ul className={`mt-3 space-y-2 text-sm text-muted-foreground ${col.title === "Languages" ? "sm:columns-2 sm:gap-6 [&>li]:break-inside-avoid" : ""}`}>
               {col.links.map(([label, href]) => (
                 <li key={href}>
                   <Link href={href} className="hover:text-foreground">
@@ -125,7 +129,7 @@ const SYSTEM = [
   { icon: Ear, title: "Ear training", body: `${CONTENT.pairs} minimal pairs, tracked per contrast, so you hear the difference before you try to say it.` },
   { icon: ListChecks, title: "Personal drills", body: "Unclear words from your recordings are collected automatically and practised until they are clear." },
   { icon: CalendarClock, title: "Spaced checks", body: "Words you fix come back after 2 and 7 days. Pass both and they are mastered for good." },
-  { icon: AudioWaveform, title: "Sound-by-sound scoring", body: `In ${CONTENT.soundLevel} languages, see which sound inside a word is off and track your weakest sounds.` },
+  { icon: AudioWaveform, title: "Sound-by-sound scoring", body: "Pro scores English sound by sound on our servers and tracks your weakest sounds. Every language gets the precise sound check." },
   { icon: Flame, title: "Streaks and goals", body: "A daily plan, a goal you choose, and a calendar that shows the habit forming." },
   { icon: Mic, title: "Checkpoint test", body: "Three readings scored the same way every time: one number you can compare month to month." },
 ];
@@ -218,7 +222,7 @@ const FEATURES = [
   },
 ];
 
-const FAQ = [
+export const FAQ = [
   {
     q: "How does it know what I got wrong?",
     a: "Three checks run on every recording. Your audio is lined up against the text you read to find each word. A separate recogniser, which has not seen the text, writes down what it heard. And your pitch and timing are compared with a native reading of the same text. Words that fail these checks are the ones you see highlighted.",
@@ -233,7 +237,7 @@ const FAQ = [
   },
   {
     q: "Which languages can I practise?",
-    a: `${LANGUAGES.map((l) => l.name).join(", ")}. Sound-by-sound scoring on the Pro plan covers 15 of them.`,
+    a: `${LANGUAGES.map((l) => l.name).join(", ")}. Server sound-by-sound scores on the Pro plan are English only; every language gets the precise sound check.`,
   },
   {
     q: "Can I cancel?",
@@ -259,11 +263,11 @@ export function Landing() {
         <div className="relative mx-auto grid max-w-6xl gap-10 px-4 py-16 md:px-8 md:py-24 lg:grid-cols-[minmax(0,1fr)_420px] lg:items-center">
           <div>
             <h1 className="max-w-xl text-4xl font-semibold tracking-tight md:text-6xl">
-              Sound clear. Then sound native.
+              Find the words a listener would miss. Then fix them.
             </h1>
             <p className="mt-5 max-w-xl text-lg text-muted-foreground">
-              Read aloud, and {SITE.name} shows which words a listener would miss, how your rhythm and melody compare with
-              a native voice, and exactly what to practise next.
+              Read one short sentence aloud. {SITE.name} marks every word by how clearly it came through, then turns the
+              weak ones into drills. {LANGUAGES.length} languages, free to start.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Button asChild size="lg" className="rounded-full">
@@ -276,7 +280,7 @@ export function Landing() {
                 <Link href="#how">See how it works</Link>
               </Button>
             </div>
-            <p className="mt-4 text-sm text-muted-foreground">Free plan, no card needed. 17 languages.</p>
+            <p className="mt-4 text-sm text-muted-foreground">Free plan, no card needed. {LANGUAGES.length} languages.</p>
           </div>
           <ResultPreview />
         </div>

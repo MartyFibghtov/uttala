@@ -27,7 +27,7 @@ export interface Prefs {
 export interface Settings {
   /** Daily goal in points. */
   goal: number;
-  /** Run the precise sound check on this device after each recording. */
+  /** Run the precise sound check (on our server) after each recording. */
   soundCheck?: boolean;
 }
 
@@ -49,6 +49,8 @@ interface Shape {
   settings: Settings;
   /** Achievements the learner has already been told about. */
   badges: string[];
+  /** Weak words that did not fit the free drill list (this browser only). */
+  leftOut: { lang: string; text: string }[];
 }
 
 const defaults: Shape = {
@@ -65,6 +67,7 @@ const defaults: Shape = {
   mastered: [],
   settings: { goal: DEFAULT_GOAL },
   badges: [],
+  leftOut: [],
 };
 
 /** Keys that are saved to the learner's account, not just this browser. */
@@ -316,6 +319,8 @@ export interface Recorded {
   mastered: string[];
   /** True when this beat the previous best score for the text. */
   personalBest: boolean;
+  /** Unclear words from this take that did not fit the drill list on the learner's plan. */
+  leftOut: string[];
 }
 
 /** Save an attempt, award points and update the list of things worth drilling. */
@@ -380,8 +385,16 @@ export function recordAttempt(
     }
   }
   // Weakest first; a plan with a capped drill list keeps only the weakest few per language.
-  const kept = [...weak.values()].sort((a, b) => a.avg - b.avg).slice(0, opts.maxDrillWords ?? 200);
+  const ranked = [...weak.values()].sort((a, b) => a.avg - b.avg);
+  const kept = ranked.slice(0, opts.maxDrillWords ?? 200);
   write("weak", [...all.filter((w) => w.lang !== lang), ...kept]);
+  // Remember which unclear words did not fit, so the learner can see what a longer list would hold.
+  const dropped = ranked.slice(kept.length).map((w) => ({ lang, text: w.text }));
+  const keptTexts = new Set(kept.map((w) => w.text));
+  const leftOut = [...dropped, ...read("leftOut").filter((w) => !(w.lang === lang && keptTexts.has(w.text)))]
+    .filter((w, i, all2) => all2.findIndex((x) => x.lang === w.lang && x.text === w.text) === i)
+    .slice(0, 30);
+  if (JSON.stringify(leftOut) !== JSON.stringify(read("leftOut"))) write("leftOut", leftOut);
   if (mastered.length) write("mastered", [...mastered, ...read("mastered")].slice(0, 500));
 
   const xp = XP.attempt(overall) + mastered.length * XP.wordMastered;
@@ -429,5 +442,49 @@ export function recordAttempt(
     }
     write("phonemes", [...phonemes.values()]);
   }
-  return { attempt, mastered: mastered.map((w) => w.text), personalBest };
+  return { attempt, mastered: mastered.map((w) => w.text), personalBest, leftOut: dropped.map((w) => w.text) };
+}
+
+
+// --- Upgrade card cadence ---------------------------------------------------
+// Unprompted upgrade cards are rationed in this browser only: one per calendar day, and none for a week
+// after the learner says "Not now". Cards the learner opens themselves are never counted.
+
+interface NudgeState {
+  day: string;
+  kind: string;
+  snoozeUntil: number;
+}
+
+const readNudge = (): NudgeState => {
+  try {
+    const raw = window.localStorage.getItem(prefix + "nudge");
+    if (raw) return JSON.parse(raw) as NudgeState;
+  } catch {
+    // Storage unavailable: behave as if nothing was shown, but see claimNudge.
+  }
+  return { day: "", kind: "", snoozeUntil: 0 };
+};
+
+const writeNudge = (state: NudgeState) => {
+  try {
+    window.localStorage.setItem(prefix + "nudge", JSON.stringify(state));
+  } catch {
+    // Blocked storage: the card may reappear on the next visit, which is acceptable.
+  }
+};
+
+/** True when a card of this kind may be shown now. The first kind to claim today keeps today's slot. */
+export function claimNudge(kind: string): boolean {
+  const state = readNudge();
+  const today = dayKey();
+  if (Date.now() < state.snoozeUntil) return false;
+  if (state.day === today) return state.kind === kind;
+  writeNudge({ ...state, day: today, kind });
+  return true;
+}
+
+/** The learner said "Not now": stay quiet for a while. */
+export function snoozeNudges(days: number) {
+  writeNudge({ ...readNudge(), snoozeUntil: Date.now() + days * 86_400_000 });
 }

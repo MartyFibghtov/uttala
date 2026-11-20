@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { AudioWaveform, BookOpen, ChartLine, ChevronsUpDown, Flame, Headphones, House, LogOut, Mic, Settings, Target, Users } from "lucide-react";
 import { useEffect, type ReactNode } from "react";
 import { toast } from "sonner";
+import { Logo } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -16,12 +17,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Progress } from "@/components/ui/progress";
 import { useAccount } from "@/hooks/use-account";
-import { authClient } from "@/lib/auth-client";
+import { authClient, navigate } from "@/lib/auth-client";
 import { ACHIEVEMENTS, isUnlocked } from "@/lib/gamification";
 import { PLANS } from "@/lib/plans";
 import { useOverview } from "@/lib/stats";
 import { isDue, markBadgesSeen, useStore } from "@/lib/store";
-import { SITE } from "@/lib/site";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -78,22 +78,13 @@ function StreakCard() {
   );
 }
 
-export function Logo({ href = "/" }: { href?: string }) {
-  return (
-    <Link href={href} className="flex items-center gap-2 font-semibold tracking-tight">
-      <span className="flex h-6 items-center gap-[3px]" aria-hidden>
-        {[10, 18, 24, 14].map((h, i) => (
-          <span key={i} className="w-[3px] rounded-full bg-foreground" style={{ height: h }} />
-        ))}
-      </span>
-      {SITE.name}
-    </Link>
-  );
-}
-
 async function signOut() {
-  await authClient.signOut();
-  window.location.assign("/");
+  try {
+    await authClient.signOut();
+  } catch {
+    // Leave anyway; the server session expires on its own.
+  }
+  navigate("/");
 }
 
 /** Today's allowance, with the upgrade path for people on the free plan. */

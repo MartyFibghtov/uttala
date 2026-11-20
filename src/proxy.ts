@@ -1,7 +1,7 @@
 import { getSessionCookie } from "better-auth/cookies";
 import { NextResponse, type NextRequest } from "next/server";
 
-const APP = ["/home", "/learn", "/practice", "/drills", "/sounds", "/progress", "/community", "/assessment", "/account", "/onboarding"];
+const APP = ["/home", "/learn", "/practice", "/drills", "/sounds", "/progress", "/community", "/assessment", "/account", "/onboarding", "/lab", "/shadowing"];
 const AUTH = ["/sign-in", "/sign-up"];
 
 /**
@@ -35,5 +35,7 @@ export const config = {
     "/assessment/:path*",
     "/account/:path*",
     "/onboarding/:path*",
+    "/lab/:path*",
+    "/shadowing/:path*",
   ],
 };

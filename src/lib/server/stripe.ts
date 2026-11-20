@@ -8,7 +8,28 @@ export const stripeEnabled = () => !!process.env.STRIPE_SECRET_KEY;
 
 export function stripe(): Stripe {
   if (!process.env.STRIPE_SECRET_KEY) throw new Error("Payments are not configured.");
-  return (client ??= new Stripe(process.env.STRIPE_SECRET_KEY, { appInfo: { name: "SayClear" } }));
+  return (client ??= new Stripe(process.env.STRIPE_SECRET_KEY, {
+    appInfo: { name: "SayClear" },
+    maxNetworkRetries: 2,
+    timeout: 20_000,
+    ...apiBaseConfig(process.env.STRIPE_API_BASE),
+  }));
+}
+
+/**
+ * Optional STRIPE_API_BASE (e.g. http://127.0.0.1:12111) points the client at a
+ * local mock server for end-to-end tests. Inert when unset or invalid.
+ */
+function apiBaseConfig(base: string | undefined): { protocol?: "http" | "https"; host?: string; port?: number } {
+  if (!base) return {};
+  try {
+    const u = new URL(base);
+    const protocol = u.protocol === "https:" ? "https" : "http";
+    return { protocol, host: u.hostname, port: u.port ? Number(u.port) : protocol === "https" ? 443 : 80 };
+  } catch {
+    console.error("STRIPE_API_BASE is not a valid URL; ignoring it.");
+    return {};
+  }
 }
 
 export interface SubscriptionRow {
@@ -27,7 +48,10 @@ export interface SubscriptionRow {
 export const getSubscriptionRow = (userId: string) =>
   first<SubscriptionRow>("SELECT * FROM subscription WHERE user_id = ?", [userId]);
 
-/** Statuses that keep paid features on. `past_due` is a grace period while Stripe retries the card. */
+/**
+ * Statuses that keep paid features on. `past_due` is a grace period while Stripe retries the card.
+ * Everything else (incomplete, incomplete_expired, unpaid, paused, canceled) is treated as free.
+ */
 const ENTITLED = new Set(["active", "trialing", "past_due"]);
 
 export function planOf(row: SubscriptionRow | undefined): PlanId {
@@ -66,8 +90,98 @@ async function ensureCustomer(user: { id: string; email: string; name: string })
   return (await getSubscriptionRow(user.id)) as SubscriptionRow;
 }
 
-const randomLetters = (n: number) =>
-  Array.from(crypto.getRandomValues(new Uint8Array(n)), (b) => String.fromCharCode(97 + (b % 26))).join("");
+// Fixed per release (not random per call) so idempotent replays send identical parameters.
+const CHECKOUT_LABEL = "sayclear_checkout_qvhzmtrk";
+
+/** An error whose message is safe to show to the user. */
+export class BillingError extends Error {}
+
+/**
+ * One-way ledger of emails that have used a trial, so deleting the account (and its
+ * Stripe customer) and re-registering does not earn a second trial. Only an HMAC of the
+ * lowercased email is stored; it cannot be reversed without BETTER_AUTH_SECRET.
+ */
+let ledgerReady: Promise<unknown> | undefined;
+
+async function ledger() {
+  ledgerReady ??= db()
+    .execute("CREATE TABLE IF NOT EXISTS trial_ledger (email_hash TEXT PRIMARY KEY, created_at INTEGER NOT NULL)")
+    .catch((e) => {
+      ledgerReady = undefined;
+      throw e;
+    });
+  await ledgerReady;
+}
+
+async function emailHash(email: string): Promise<string | null> {
+  const secret = process.env.BETTER_AUTH_SECRET;
+  if (!secret) return null;
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(email.trim().toLowerCase()));
+  return Array.from(new Uint8Array(mac), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function recordTrial(email: string | null | undefined): Promise<void> {
+  try {
+    const hash = email ? await emailHash(email) : null;
+    if (!hash) return;
+    await ledger();
+    await db().execute({ sql: "INSERT OR IGNORE INTO trial_ledger (email_hash, created_at) VALUES (?, ?)", args: [hash, Date.now()] });
+  } catch (err) {
+    console.error("trial ledger write failed", err);
+  }
+}
+
+async function recordTrialFor(customerId: string): Promise<void> {
+  const c = await stripe().customers.retrieve(customerId).catch(() => null);
+  if (c && !c.deleted) await recordTrial(c.email);
+}
+
+async function inLedger(email: string): Promise<boolean> {
+  const hash = await emailHash(email);
+  if (!hash) return false;
+  await ledger();
+  return !!(await first("SELECT 1 AS x FROM trial_ledger WHERE email_hash = ?", [hash]));
+}
+
+/** Cheap check for the UI (no Stripe calls): the same row and ledger rules checkout applies first. */
+export async function trialOffered(trialUsed: boolean, email: string): Promise<boolean> {
+  if (trialUsed) return false;
+  try {
+    return !(await inLedger(email));
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * The free trial is once per person: not if this customer had one, and not if
+ * another Stripe customer with the same email did (covers re-registering).
+ */
+async function trialAvailable(row: SubscriptionRow, email: string): Promise<boolean> {
+  if (row.trial_used) return false;
+  const emails = [...new Set([email, email.toLowerCase()])];
+  // Best effort: a failed lookup must not block a sale, so it fails open.
+  try {
+    if (await inLedger(email)) return false;
+    return await noTrialElsewhere(row, emails);
+  } catch (err) {
+    console.error("trial lookup failed", err);
+    return true;
+  }
+}
+
+async function noTrialElsewhere(row: SubscriptionRow, emails: string[]): Promise<boolean> {
+  for (const e of emails) {
+    const others = await stripe().customers.list({ email: e, limit: 10 });
+    for (const c of others.data) {
+      if (c.id === row.customer_id) continue;
+      const subs = await stripe().subscriptions.list({ customer: c.id, status: "all", limit: 10 });
+      if (subs.data.some((s) => s.trial_start !== null)) return false;
+    }
+  }
+  return true;
+}
 
 /**
  * Where to send the user to pay. People who already subscribe go to the
@@ -79,22 +193,58 @@ export async function checkoutUrl(
   interval: Interval,
   origin: string,
 ): Promise<string> {
-  const row = await ensureCustomer(user);
-  if (planOf(row) !== "free") return portalUrl(user.id, origin);
+  let row = await ensureCustomer(user);
+  // Our copy may be behind the webhook; ask Stripe before deciding anything.
+  await syncCustomer(row.customer_id as string);
+  row = (await getSubscriptionRow(user.id)) ?? row;
 
-  const session = await stripe().checkout.sessions.create({
-    mode: "subscription",
-    customer: row.customer_id as string,
-    line_items: [{ price: await priceId(plan, interval), quantity: 1 }],
-    subscription_data: row.trial_used ? {} : { trial_period_days: TRIAL_DAYS },
-    allow_promotion_codes: true,
-    billing_address_collection: "auto",
-    customer_update: { address: "auto", name: "auto" },
-    ...(process.env.STRIPE_AUTOMATIC_TAX === "true" ? { automatic_tax: { enabled: true } } : {}),
-    integration_identifier: `sayclear_checkout_${randomLetters(8)}`,
-    success_url: `${origin}/account?checkout=success`,
-    cancel_url: `${origin}/account?checkout=cancelled`,
-  });
+  if (row.flagged) throw new BillingError("Billing is unavailable for this account. Please contact support.");
+  if (planOf(row) !== "free" || row.status === "paused") return portalUrl(user.id, origin);
+  if (row.status === "unpaid" && row.subscription_id) {
+    // A dead subscription must not linger next to the new one.
+    await stripe().subscriptions.cancel(row.subscription_id).catch(() => undefined);
+  }
+
+  const withTrial = await trialAvailable(row, user.email);
+  const price = await priceId(plan, interval);
+  const tax = process.env.STRIPE_AUTOMATIC_TAX === "true";
+  // Double-click guard: identical requests within a minute share one Checkout Session.
+  const idempotencyKey = `checkout-${user.id}-${price}-${withTrial ? "t" : "n"}-${tax ? "x" : "-"}-${Math.floor(Date.now() / 60_000)}`;
+
+  const session = await stripe().checkout.sessions.create(
+    {
+      mode: "subscription",
+      customer: row.customer_id as string,
+      client_reference_id: user.id,
+      line_items: [{ price, quantity: 1 }],
+      // Always collect a card up front: higher trial-to-paid conversion, and
+      // Stripe can charge at trial end and send its trial-ending reminder emails.
+      payment_method_collection: "always",
+      subscription_data: {
+        metadata: { user_id: user.id },
+        ...(withTrial
+          ? { trial_period_days: TRIAL_DAYS, trial_settings: { end_behavior: { missing_payment_method: "cancel" as const } } }
+          : {}),
+      },
+      custom_text: {
+        submit: {
+          message: withTrial
+            ? `Your ${TRIAL_DAYS}-day free trial starts today. We charge your card when it ends unless you cancel first. Cancel any time from your account.`
+            : "Your subscription renews automatically. Cancel any time from your account.",
+        },
+      },
+      allow_promotion_codes: true,
+      billing_address_collection: "auto",
+      customer_update: { address: "auto", name: "auto" },
+      ...(tax ? { automatic_tax: { enabled: true }, tax_id_collection: { enabled: true } } : {}),
+      // Prices carry SEK/EUR currency_options, so Checkout localises by itself. Adaptive Pricing is opt-in.
+      ...(process.env.STRIPE_ADAPTIVE_PRICING === "true" ? { adaptive_pricing: { enabled: true } } : {}),
+      integration_identifier: CHECKOUT_LABEL,
+      success_url: `${origin}/account?checkout=success`,
+      cancel_url: `${origin}/account?checkout=cancelled`,
+    },
+    { idempotencyKey },
+  );
   if (!session.url) throw new Error("Stripe did not return a checkout link.");
   return session.url;
 }
@@ -122,16 +272,26 @@ function planOfSubscription(sub: Stripe.Subscription): { plan: PlanId; interval:
   return { plan: plan ?? "free", interval };
 }
 
+const LIVE = new Set(["active", "trialing"]);
+const RANK = ["active", "trialing", "past_due", "unpaid", "paused", "incomplete", "incomplete_expired", "canceled"];
+
 /** Copy the customer's current subscription from Stripe into our database. Stripe is the source of truth. */
 export async function syncCustomer(customerId: string): Promise<void> {
   const subs = await stripe().subscriptions.list({ customer: customerId, status: "all", limit: 20 });
-  const current =
-    subs.data.find((s) => s.status === "active" || s.status === "trialing") ??
-    subs.data.find((s) => s.status === "past_due") ??
-    subs.data[0];
+  // Best status first, newest first within a status (the API lists newest first and sort is stable).
+  const ranked = [...subs.data].sort((a, b) => RANK.indexOf(a.status) - RANK.indexOf(b.status));
+  const current = ranked[0];
   const hadTrial = subs.data.some((s) => s.trial_start !== null) ? 1 : 0;
 
-  if (!current) {
+  // Two paid subscriptions can only come from a double checkout. Keep the oldest, cancel the rest.
+  const live = subs.data.filter((s) => LIVE.has(s.status)).sort((a, b) => a.created - b.created);
+  for (const extra of live.slice(1)) {
+    console.warn(`Duplicate subscription ${extra.id} for customer ${customerId}: cancelling it (refund manually if charged).`);
+    await stripe().subscriptions.cancel(extra.id, { prorate: true }).catch((e) => console.error("cancel duplicate failed", e));
+  }
+  const keep = live[0] ?? current;
+
+  if (!keep) {
     await db().execute({
       sql: `UPDATE subscription SET subscription_id = NULL, plan = 'free', billing_interval = NULL, status = NULL,
             period_end = NULL, cancel_at_period_end = 0, updated_at = ? WHERE customer_id = ?`,
@@ -139,18 +299,21 @@ export async function syncCustomer(customerId: string): Promise<void> {
     });
     return;
   }
-  const { plan, interval } = planOfSubscription(current);
-  const item = current.items.data[0];
+  if (hadTrial) await recordTrialFor(customerId);
+  const { plan, interval } = planOfSubscription(keep);
+  if (plan === "free" && LIVE.has(keep.status)) console.error(`Subscription ${keep.id} has an unrecognised price.`);
+  // In current API versions the period lives on the items, not the subscription.
+  const ends = keep.items.data.map((i) => i.current_period_end).filter((n) => typeof n === "number");
   await db().execute({
     sql: `UPDATE subscription SET subscription_id = ?, plan = ?, billing_interval = ?, status = ?, period_end = ?,
           cancel_at_period_end = ?, trial_used = MAX(trial_used, ?), updated_at = ? WHERE customer_id = ?`,
     args: [
-      current.id,
+      keep.id,
       plan,
       interval,
-      current.status,
-      item?.current_period_end ?? null,
-      current.cancel_at_period_end || current.cancel_at ? 1 : 0,
+      keep.status,
+      ends.length ? Math.min(...ends) : null,
+      keep.cancel_at_period_end || keep.cancel_at ? 1 : 0,
       hadTrial,
       Date.now(),
       customerId,
@@ -167,8 +330,14 @@ export async function syncUser(userId: string): Promise<void> {
 export async function deleteCustomerFor(userId: string): Promise<void> {
   const row = await getSubscriptionRow(userId);
   if (!row?.customer_id || !stripeEnabled()) return;
-  // Deleting a customer cancels its subscriptions immediately.
-  await stripe().customers.del(row.customer_id);
+  // Remember (as a one-way hash) that this email used a trial before its history disappears.
+  if (row.trial_used) await recordTrialFor(row.customer_id);
+  // Deleting a customer cancels its subscriptions immediately. Already gone counts as done.
+  try {
+    await stripe().customers.del(row.customer_id);
+  } catch (err) {
+    if ((err as { code?: string })?.code !== "resource_missing") throw err;
+  }
 }
 
 const idOf = (v: string | { id: string } | null | undefined) => (typeof v === "string" ? v : (v?.id ?? null));
@@ -186,12 +355,12 @@ async function flag(customerId: string) {
   });
 }
 
-/** Stop future renewals for a customer whose payment is disputed or suspected fraudulent. */
+/** End access now for a customer whose payment is disputed or suspected fraudulent. */
 async function stopRenewals(customerId: string) {
   const subs = await stripe().subscriptions.list({ customer: customerId, status: "all", limit: 20 });
   for (const s of subs.data) {
-    if (["active", "trialing", "past_due"].includes(s.status) && !s.cancel_at_period_end) {
-      await stripe().subscriptions.update(s.id, { cancel_at_period_end: true });
+    if (["active", "trialing", "past_due", "unpaid", "paused"].includes(s.status)) {
+      await stripe().subscriptions.cancel(s.id);
     }
   }
 }
@@ -237,7 +406,7 @@ export async function handleEvent(event: Stripe.Event): Promise<void> {
     case "charge.dispute.created": {
       const customer = await customerOfCharge(event.data.object.charge);
       if (!customer) return;
-      console.warn(`Stripe dispute ${event.data.object.id} for customer ${customer}: renewals stopped.`);
+      console.warn(`Stripe dispute ${event.data.object.id} for customer ${customer}: subscription cancelled.`);
       await flag(customer);
       await stopRenewals(customer);
       await syncCustomer(customer);
@@ -246,7 +415,7 @@ export async function handleEvent(event: Stripe.Event): Promise<void> {
     case "radar.early_fraud_warning.created": {
       const customer = await customerOfCharge(event.data.object.charge);
       if (!customer) return;
-      console.warn(`Stripe early fraud warning ${event.data.object.id} for customer ${customer}: renewals stopped.`);
+      console.warn(`Stripe early fraud warning ${event.data.object.id} for customer ${customer}: subscription cancelled.`);
       await flag(customer);
       await stopRenewals(customer);
       await syncCustomer(customer);
@@ -265,15 +434,22 @@ export async function handleEvent(event: Stripe.Event): Promise<void> {
   }
 }
 
-/** Returns false when this event was already processed. */
-export async function claimEvent(eventId: string): Promise<boolean> {
-  const res = await db().execute({
+/**
+ * Event dedupe. Handlers only copy Stripe's current state, so running one twice is
+ * harmless; we therefore record an event only AFTER it succeeded. A crash mid-handler
+ * leaves it unrecorded and Stripe's retry processes it again.
+ */
+export async function isProcessed(eventId: string): Promise<boolean> {
+  return !!(await first<{ id: string }>("SELECT id FROM stripe_event WHERE id = ?", [eventId]));
+}
+
+export async function markProcessed(eventId: string): Promise<void> {
+  await db().execute({
     sql: "INSERT OR IGNORE INTO stripe_event (id, created_at) VALUES (?, ?)",
     args: [eventId, Date.now()],
   });
-  return res.rowsAffected > 0;
-}
-
-export async function releaseEvent(eventId: string): Promise<void> {
-  await db().execute({ sql: "DELETE FROM stripe_event WHERE id = ?", args: [eventId] });
+  if (Math.random() < 0.01) {
+    // Stripe retries for at most 3 days; keep a month.
+    await db().execute({ sql: "DELETE FROM stripe_event WHERE created_at < ?", args: [Date.now() - 30 * 86_400_000] });
+  }
 }

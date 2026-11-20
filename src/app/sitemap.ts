@@ -2,13 +2,25 @@ import type { MetadataRoute } from "next";
 import { languageSlug } from "@/components/marketing-pages";
 import { LANGUAGES } from "@/lib/languages";
 import { SITE } from "@/lib/site";
+import { soundSlug, soundsFor } from "@/lib/sounds";
+
+// Only meaningful, indexable pages. lastModified is the date the content last changed, not the build time.
+const LEGAL_UPDATED = "2026-11-10";
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const pages = ["", "/features", "/languages", "/method", "/pricing", "/help", "/sign-up", "/sign-in", "/terms", "/privacy"];
-  const languages = LANGUAGES.map((l) => `/languages/${languageSlug(l)}`);
-  return [...pages, ...languages].map((path) => ({
-    url: `${SITE.url}${path}`,
-    changeFrequency: "monthly",
-    priority: path === "" ? 1 : 0.6,
-  }));
+  const entry = (path: string, lastModified = SITE.updated) => ({ url: `${SITE.url}${path}`, lastModified });
+  return [
+    entry(""),
+    entry("/features"),
+    entry("/languages"),
+    entry("/method"),
+    entry("/pricing"),
+    entry("/help"),
+    entry("/terms", LEGAL_UPDATED),
+    entry("/privacy", LEGAL_UPDATED),
+    ...LANGUAGES.flatMap((l) => {
+      const base = `/languages/${languageSlug(l)}`;
+      return [entry(base), entry(`${base}/sounds`), ...soundsFor(l.code).map((s) => entry(`${base}/sounds/${soundSlug(s)}`))];
+    }),
+  ];
 }

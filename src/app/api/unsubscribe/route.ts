@@ -12,8 +12,25 @@ const page = (title: string, body: string, status: number) =>
     { status, headers: { "content-type": "text/html; charset=utf-8" } },
   );
 
-/** Stops reminder emails from the signed link in each one. Works without signing in. */
-async function handle(request: Request) {
+const escapeAttr = (v: string) => v.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+/**
+ * A link in an email can be opened by mail scanners, so GET only asks; the button (or a mail client's
+ * one-click POST) does the unsubscribing.
+ */
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const u = escapeAttr(url.searchParams.get("u") ?? "");
+  const t = escapeAttr(url.searchParams.get("t") ?? "");
+  return page(
+    "Stop practice reminders?",
+    `Press the button below to stop reminder emails. You can turn them back on in Settings at any time.</p>` +
+      `<form method="post" action="/api/unsubscribe?u=${u}&amp;t=${t}"><button type="submit" style="font:inherit;padding:.6rem 1.2rem;border-radius:999px;border:0;background:#111;color:#fff;cursor:pointer">Stop reminders</button></form><p>`,
+    200,
+  );
+}
+
+export async function POST(request: Request) {
   const url = new URL(request.url);
   await ready();
   const ok = await unsubscribe(url.searchParams.get("u") ?? "", url.searchParams.get("t") ?? "");
@@ -21,7 +38,3 @@ async function handle(request: Request) {
     ? page("Reminders are off", "You will not get practice reminders any more. You can turn them back on in Settings.", 200)
     : page("This link did not work", "Sign in and turn reminders off in Settings instead.", 400);
 }
-
-export const GET = handle;
-// Mail clients that support one-click unsubscribe send a POST to the same address.
-export const POST = handle;

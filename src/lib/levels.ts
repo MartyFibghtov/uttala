@@ -86,12 +86,20 @@ const CURVE: [number, number][] = [
   [33.3, 100],
 ];
 
+const EN_FUNCTION_WORDS = new Set(
+  "the a an is are was were be to of and in on at it i you he she we they that this than for with or but as can could will would".split(" "),
+);
+
 /**
  * Map a raw engine word score onto the native-anchored scale: the native tenth lands at 92, so 90+
  * means within the range real native speakers reach, and anything less drops off quickly.
  */
-export function toNativeScale(raw: number, lang: string): number {
-  const spread = Math.min(10, Math.max(3, 100 - (NATIVE_P10[lang] ?? DEFAULT_NATIVE_P10)));
+export function toNativeScale(raw: number, lang: string, word?: string): number {
+  const base = Math.min(10, Math.max(3, 100 - (NATIVE_P10[lang] ?? DEFAULT_NATIVE_P10)));
+  // Short unstressed English function words are reduced in natural speech ("The" opening a sentence,
+  // "is"), and Azure scores that reduction as an error: stock native voices get raw 80-88 on them
+  // while content words stay at 94+. Give them a wider native spread.
+  const spread = lang === "en" && word && EN_FUNCTION_WORDS.has(word.toLowerCase()) ? Math.min(10, base * 2.5) : base;
   const x = Math.max(0, 100 - raw) / spread;
   for (let i = 1; i < CURVE.length; i++) {
     const [x0, y0] = CURVE[i - 1];

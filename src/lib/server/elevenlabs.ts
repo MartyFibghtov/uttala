@@ -4,7 +4,7 @@ import { tokenize } from "../text";
 import type { TimedChar, TtsResponse, Voice, VoiceRole } from "../types";
 import { db, first } from "./db";
 
-const BASE = "https://api.elevenlabs.io";
+const BASE = process.env.ELEVENLABS_API_BASE ?? "https://api.elevenlabs.io";
 const key = () => process.env.ELEVENLABS_API_KEY ?? "";
 
 export const hasElevenLabs = () => key().length > 0;

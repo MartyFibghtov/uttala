@@ -16,6 +16,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { useAccount } from "@/hooks/use-account";
 import { getLanguage } from "@/lib/languages";
 import type { LevelId } from "@/lib/levels";
 import { contrastsFor } from "@/lib/minimal-pairs";
@@ -156,13 +157,18 @@ export interface GenerateRequestOptions {
 }
 
 export async function requestGeneratedText(opts: GenerateRequestOptions): Promise<GeneratedText> {
-  const res = await fetch("/api/generate", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(opts),
-  });
-  const data = (await res.json()) as GeneratedText & { error?: string };
-  if (!res.ok) throw new Error(data.error ?? "Could not generate a practice sentence.");
+  let res: Response;
+  try {
+    res = await fetch("/api/generate", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(opts),
+    });
+  } catch {
+    throw new Error("We could not reach SayClear. Check your connection and try again.");
+  }
+  const data = (await res.json().catch(() => null)) as (GeneratedText & { error?: string }) | null;
+  if (!res.ok || !data) throw new Error(data?.error ?? "Could not generate a practice sentence right now. Please try again.");
   addGeneratedText(data);
   return data;
 }
@@ -230,6 +236,9 @@ export function WeakSpotGenerator({
   const [selectedContrasts, setSelectedContrasts] = useState<string[] | null>(null);
   const [selectedProsody, setSelectedProsody] = useState<ProsodyFocus[] | null>(null);
   const [customFocus, setCustomFocus] = useState("");
+  const { me, promptUpgrade } = useAccount();
+  // Free-text focus is a Plus feature (enforced in /api/generate); the picked weak spots stay free.
+  const canFocus = me.entitlements.customText;
 
   const customInputId = useId();
   const customHintId = useId();
@@ -324,7 +333,7 @@ export function WeakSpotGenerator({
         sounds,
         contrasts,
         prosody: activeProsody,
-        customFocus: customFocus.trim() || undefined,
+        customFocus: (canFocus && customFocus.trim()) || undefined,
         avoid: profile.recentTexts,
         selectedOnly: true,
       });
@@ -545,7 +554,16 @@ export function WeakSpotGenerator({
                 onChange={(e) => setCustomFocus(e.target.value)}
                 aria-describedby={customHintId}
                 placeholder="e.g. words with th and r, or introducing my team at work"
+                disabled={!canFocus}
               />
+              {!canFocus && (
+                <p className="text-xs text-muted-foreground">
+                  Writing your own focus is part of Plus. The weak spots you picked above work on every plan.{" "}
+                  <button type="button" className="underline underline-offset-2" onClick={() => promptUpgrade("customText")}>
+                    See Plus
+                  </button>
+                </p>
+              )}
             </div>
 
             <DialogFooter>

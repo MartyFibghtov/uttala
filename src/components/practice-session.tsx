@@ -28,10 +28,11 @@ import { WordCompareControls } from "@/components/word-compare";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { UpgradeCard, useNudge } from "@/components/pricing";
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 import { useAccount, type UpgradeReason } from "@/hooks/use-account";
-import { MAX_RECORDING_SECONDS, useRecorder } from "@/hooks/use-recorder";
+import { isSilent, MAX_RECORDING_SECONDS, recorderErrorMessage, SILENT_MESSAGE, useRecorder } from "@/hooks/use-recorder";
 import {
   decodeToMono16k,
   encodeWav,
@@ -47,10 +48,12 @@ import {
 } from "@/lib/audio";
 import { getLanguage, type Phrase } from "@/lib/languages";
 import { LEVELS, type LevelId } from "@/lib/levels";
+import { resetTimeLabel } from "@/lib/plans";
+import { buildReferenceContour } from "@/components/pitch-chart";
 import type { Deduction } from "@/lib/deductions";
 import { compareProsody, fallbackProsody, overallFor } from "@/lib/prosody";
 import { bandFor, DEPTH_NOTE } from "@/lib/score-bands";
-import { preloadRatingModel, rateWithDeductions } from "@/lib/rating";
+import { rateWithDeductions } from "@/lib/rating";
 import { soundForIpa } from "@/lib/sounds";
 import { isShort, SHORT, splitShort, wordCount } from "@/lib/short";
 import { bestKey, recordAttempt, useStore } from "@/lib/store";
@@ -75,6 +78,36 @@ export class UpgradeNeeded extends Error {
   }
 }
 
+
+/**
+ * Send one recording to /api/assess and return the result. Every failure becomes a message that says what
+ * happened and whether the day's allowance was spent (it never is for a failed analysis).
+ */
+export async function postAssess(form: FormData): Promise<AssessResult> {
+  let res: Response;
+  try {
+    // Never leave the learner on "Analysing…": the server gives up after 60 s, the page after 45 s.
+    res = await fetch("/api/assess", { method: "POST", body: form, signal: AbortSignal.timeout(45_000) });
+  } catch (err) {
+    if (err instanceof DOMException && (err.name === "TimeoutError" || err.name === "AbortError")) {
+      throw new Error("The analysis is taking too long right now. Please try that take again in a moment.");
+    }
+    throw new Error("We could not reach SayClear. Check your connection and try again. Nothing was used from today's allowance.");
+  }
+  const data = (await res.json().catch(() => null)) as (AssessResult & { error?: string; upgrade?: UpgradeReason }) | null;
+  if (data?.upgrade) throw new UpgradeNeeded(data.upgrade);
+  if (res.status === 401) throw new Error("You have been signed out. Sign in again to continue.");
+  if (!res.ok || !data) {
+    throw new Error(
+      data?.error ??
+        (res.status === 413
+          ? "That recording is too long. Keep each take to one short sentence."
+          : "Something went wrong on our side. Nothing was used from today's allowance; please try again."),
+    );
+  }
+  return data;
+}
+
 const references = new Map<string, Promise<Reference>>();
 
 /** Fetch (once) the reference reading with DP-aligned + acoustically refined word timings and pitch contour. */
@@ -84,14 +117,19 @@ export function loadReference(text: string, lang: string, level: LevelId, voiceI
   let pending = references.get(key);
   if (!pending) {
     pending = (async () => {
-      const res = await fetch("/api/tts", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ text: clean, lang, level, voiceId }),
-      });
-      const data = (await res.json()) as TtsResponse & { error?: string; upgrade?: UpgradeReason };
-      if (data.upgrade) throw new UpgradeNeeded(data.upgrade);
-      if (!res.ok) throw new Error(data.error ?? "Could not load the reference audio.");
+      let res: Response;
+      try {
+        res = await fetch("/api/tts", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ text: clean, lang, level, voiceId }),
+        });
+      } catch {
+        throw new Error("We could not reach the reference voice. Check your connection and try again.");
+      }
+      const data = (await res.json().catch(() => null)) as (TtsResponse & { error?: string; upgrade?: UpgradeReason }) | null;
+      if (data?.upgrade) throw new UpgradeNeeded(data.upgrade);
+      if (!res.ok || !data) throw new Error(data?.error ?? "The reference voice is not answering right now. Please try again in a moment.");
       const bytes = Uint8Array.from(atob(data.audio), (c) => c.charCodeAt(0));
       const blob = new Blob([bytes], { type: data.mime });
       const samples = await decodeToMono16k(blob).catch(() => null);
@@ -190,6 +228,8 @@ interface Outcome {
   reference: Reference | null;
   attempt: Attempt;
   personalBest: boolean;
+  /** Unclear words that did not fit the drill list on this plan. */
+  leftOut: string[];
 }
 
 interface Props {
@@ -235,10 +275,6 @@ export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChan
   }, [outcome?.userUrl]);
 
   useEffect(() => stopPlayback, []);
-  // Fetch the sound model early so it is ready by the first recording (about 240 MB, once).
-  useEffect(() => {
-    preloadRatingModel().catch(() => undefined);
-  }, []);
 
   const fail = useCallback(
     (err: unknown, fallback: string) => {
@@ -254,7 +290,11 @@ export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChan
       try {
         const samples = await decodeToMono16k(blob);
         if (samples.length < SAMPLE_RATE * 0.4) {
-          toast.error("That was too short. Try again.");
+          toast.error("That was too short. Say the whole sentence, then press Stop. This did not use a recording.");
+          return;
+        }
+        if (isSilent(samples)) {
+          toast.error(SILENT_MESSAGE);
           return;
         }
         const wav = encodeWav(samples);
@@ -264,10 +304,7 @@ export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChan
         form.append("lang", lang);
         form.append("level", level);
         const refPromise = live ? loadReference(target, lang, level, voiceId).catch(() => null) : Promise.resolve(null);
-        const res = await fetch("/api/assess", { method: "POST", body: form });
-        let data = (await res.json()) as AssessResult & { error?: string; upgrade?: UpgradeReason };
-        if (data.upgrade) throw new UpgradeNeeded(data.upgrade);
-        if (!res.ok) throw new Error(data.error ?? "Assessment failed.");
+        let data = await postAssess(form);
         noteAnalysis();
 
         // Do not block the analysis result if reference TTS is still generating on a cold cache.
@@ -276,13 +313,13 @@ export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChan
           new Promise<null>((resolve) => setTimeout(() => resolve(null), 200)),
         ]);
 
-        // Main rating: score by deduction, from the sound model running on this device (src/lib/rating.ts).
+        // Main rating: score by deduction, from the sound model running on our server (src/lib/rating.ts).
         // It runs before the attempt is saved so the stored score is the deduction score.
         if (live) {
           reference ??= await Promise.race([refPromise, new Promise<null>((resolve) => setTimeout(() => resolve(null), 15000))]);
         }
         const rated = await rateWithDeductions(samples, data, reference, lang);
-        data = { ...rated.result, error: data.error, upgrade: data.upgrade };
+        data = rated.result;
 
         // Refine user word timings against the actual 16 kHz waveform energy envelope.
         const refinedUserSpans = refineSpansWithAudio(
@@ -342,6 +379,7 @@ export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChan
           reference,
           attempt: recorded.attempt,
           personalBest: recorded.personalBest,
+          leftOut: recorded.leftOut,
         });
         if (!reference && live) {
           void refPromise.then((lateRef) => {
@@ -392,8 +430,8 @@ export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChan
     }
     try {
       await recorder.start();
-    } catch {
-      toast.error("Microphone access is needed to record. Allow it in your browser and try again.");
+    } catch (err) {
+      toast.error(recorderErrorMessage(err));
     }
   };
 
@@ -651,6 +689,16 @@ export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChan
             )}
           </div>
         )}
+        {shown && shown.leftOut.length > 0 && ent.maxDrillWords !== null && me.billing && (
+          <DrillFullCard words={shown.leftOut} cap={ent.maxDrillWords} />
+        )}
+        {outOfRecordings && !recorder.recording && (
+          <p className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
+            Today&apos;s {me.usage.limit} recordings are used. They come back at {resetTimeLabel()} (midnight UTC).
+            Listening, ear training, the sound library and your drill list stay open, and everything you already
+            recorded is saved.
+          </p>
+        )}
         {shown?.result.demo && (
           <p className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
             Demo mode: these scores are simulated because the speech engine is not connected.
@@ -675,7 +723,12 @@ export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChan
               {shown.prosody ? (
                 <PitchChart contour={shown.prosody.contour} words={shown.result.words.map((w) => w.text)} />
               ) : (
-                <LockedMelody onUnlock={() => promptUpgrade("prosody")} />
+                <LockedMelody
+                  reference={shown.reference}
+                  words={shown.result.words.map((w) => w.text)}
+                  good={shown.attempt.overall >= 70}
+                  onUnlock={() => promptUpgrade("prosody")}
+                />
               )}
             </CardContent>
           </Card>
@@ -724,6 +777,34 @@ export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChan
         )}
       </div>
     </div>
+  );
+}
+
+function DrillFullCard({ words, cap }: { words: string[]; cap: number }) {
+  const { me } = useAccount();
+  const nudge = useNudge("drills", true);
+  const shownWords = words.slice(0, 4).map((w) => `“${w}”`).join(", ");
+  if (!nudge.visible) {
+    return (
+      <p className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
+        Your drill list holds {cap} words on the free plan, so {shownWords} did not fit this time. They are listed under
+        Drills.
+      </p>
+    );
+  }
+  return (
+    <UpgradeCard
+      title={`Your drill list is full at ${cap} words`}
+      currentPlan={me.plan}
+      trialAvailable={me.trialAvailable}
+      onDismiss={nudge.dismiss}
+    >
+      <p>
+        These unclear words from this take did not fit: <span className="font-medium text-foreground">{shownWords}</span>
+        {words.length > 4 ? ` and ${words.length - 4} more` : ""}. The free list keeps your {cap} weakest words, and you
+        can keep working on those. Plus has no limit, so nothing is left out.
+      </p>
+    </UpgradeCard>
   );
 }
 
@@ -901,30 +982,52 @@ function Legend() {
   );
 }
 
-function LockedMelody({ onUnlock }: { onUnlock: () => void }) {
+/**
+ * Free plan: the native melody of this very sentence is shown for free, and Plus would lay the learner's own
+ * line over it. After a good take the full explanation shows once a day; otherwise one quiet line.
+ */
+function LockedMelody({
+  reference,
+  words,
+  good,
+  onUnlock,
+}: {
+  reference: Reference | null;
+  words: string[];
+  good: boolean;
+  onUnlock: () => void;
+}) {
+  const { me } = useAccount();
+  const contour = useMemo(() => (reference ? buildReferenceContour(reference.spans, reference.pitch) : []), [reference]);
+  const nudge = useNudge("melody", good);
   return (
-    <div className="relative overflow-hidden rounded-lg">
-      <svg viewBox="0 0 600 120" className="h-28 w-full blur-[3px]" aria-hidden>
-        <path
-          d="M0,70 C60,20 110,90 170,60 S270,20 330,70 420,100 480,50 560,40 600,65"
-          fill="none"
-          strokeWidth={3}
-          className="stroke-muted-foreground/40"
-        />
-        <path
-          d="M0,80 C70,60 100,40 170,75 S280,60 330,50 430,80 480,70 550,30 600,55"
-          fill="none"
-          strokeWidth={3}
-          className="stroke-foreground/70"
-        />
-      </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/50 text-center">
-        <p className="text-sm font-medium">See how your melody compares with a native voice</p>
-        <Button size="sm" className="rounded-full" onClick={onUnlock}>
-          <Lock />
-          Unlock with Plus
-        </Button>
-      </div>
+    <div className="space-y-3">
+      {contour.length > 0 ? (
+        <PitchChart contour={contour} words={words} />
+      ) : (
+        <p className="text-sm text-muted-foreground">The native melody for this sentence is still loading.</p>
+      )}
+      {nudge.visible ? (
+        <UpgradeCard
+          title="Nice take. Here is what Plus would add to this chart"
+          currentPlan={me.plan}
+          trialAvailable={me.trialAvailable}
+          onDismiss={nudge.dismiss}
+        >
+          <p>
+            The line above is how a native speaker moves their voice through this sentence. With Plus, your own line is
+            drawn on top of it word by word, with a rhythm score, so you can see where your voice goes flat or
+            rushes. Your sounds and words are scored in full on the free plan either way.
+          </p>
+        </UpgradeCard>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          Plus draws your own melody on top of this one.{" "}
+          <button type="button" onClick={onUnlock} className="font-medium underline underline-offset-4">
+            See what it adds
+          </button>
+        </p>
+      )}
     </div>
   );
 }

@@ -1,8 +1,0 @@
-# Never upload local data, secrets or build caches to Vercel.
-.data/
-.env*
-!.env.example
-.next/
-.claude/
-node_modules/
-tsconfig.tsbuildinfo

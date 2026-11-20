@@ -29,6 +29,7 @@ import { WordCompareControls } from "@/components/word-compare";
 import {
   hear,
   loadReference,
+  postAssess,
   scoreColor,
   speakWithBrowser,
   UpgradeNeeded,
@@ -39,8 +40,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { GeneratedTextBanner, WeakSpotGenerator } from "@/components/weak-spot-generator";
-import { useAccount, type UpgradeReason } from "@/hooks/use-account";
-import { useRecorder } from "@/hooks/use-recorder";
+import { useAccount } from "@/hooks/use-account";
+import { isSilent, SILENT_MESSAGE, useRecorder } from "@/hooks/use-recorder";
 import {
   decodeToMono16k,
   encodeWav,
@@ -55,7 +56,7 @@ import {
 import { findPhrase, getLanguage, textsFor, type Phrase } from "@/lib/languages";
 import { type LevelId } from "@/lib/levels";
 import { compareProsody, overallFor } from "@/lib/prosody";
-import { preloadRatingModel, rateWithDeductions } from "@/lib/rating";
+import { rateWithDeductions } from "@/lib/rating";
 import { recordAttempt, useStore } from "@/lib/store";
 import { tokenize, type Span } from "@/lib/text";
 import type { AssessResult, Attempt, GeneratedText, ProsodyResult } from "@/lib/types";
@@ -193,10 +194,6 @@ export function ShadowingSession({
     [promptUpgrade],
   );
 
-  // Fetch the sound model early so it is ready by the first recording (about 240 MB, once).
-  useEffect(() => {
-    preloadRatingModel().catch(() => undefined);
-  }, []);
 
   const analyse = useCallback(
     async (blob: Blob) => {
@@ -205,7 +202,11 @@ export function ShadowingSession({
       try {
         const samples = await decodeToMono16k(blob);
         if (samples.length < SAMPLE_RATE * 0.4) {
-          toast.error("Recording was too short. Try shadowing the full phrase.");
+          toast.error("Recording was too short. Try shadowing the full phrase. This did not use a recording.");
+          return;
+        }
+        if (isSilent(samples)) {
+          toast.error(SILENT_MESSAGE);
           return;
         }
         const wav = encodeWav(samples);
@@ -215,15 +216,12 @@ export function ShadowingSession({
         form.append("lang", lang);
         form.append("level", level);
 
-        const [res, ref] = await Promise.all([
-          fetch("/api/assess", { method: "POST", body: form }),
+        const [engine, ref] = await Promise.all([
+          postAssess(form),
           live ? loadReference(activeText, lang, level, voiceId).catch(() => null) : Promise.resolve(null),
         ]);
-        const engine = (await res.json()) as AssessResult & { error?: string; upgrade?: UpgradeReason };
-        if (engine.upgrade) throw new UpgradeNeeded(engine.upgrade);
-        if (!res.ok) throw new Error(engine.error ?? "Shadowing analysis failed.");
         noteAnalysis();
-        // Main rating: score by deduction from the on-device sound model (src/lib/rating.ts).
+        // Main rating: score by deduction from the sound model (src/lib/rating.ts).
         const rated = await rateWithDeductions(samples, engine, ref, lang);
         const data = rated.result;
 

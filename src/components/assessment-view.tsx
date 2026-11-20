@@ -21,6 +21,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAccount } from "@/hooks/use-account";
+import { resetTimeLabel } from "@/lib/plans";
 import { diagnosticPromptsFor, getLanguage } from "@/lib/languages";
 import { addCheckpoint, useStore } from "@/lib/store";
 import type { Checkpoint } from "@/lib/types";
@@ -38,7 +39,7 @@ const RESULT_SCREENS: { id: ResultScreen; label: string }[] = [
 const STAGE_ICONS = [Ear, Timer, Music] as const;
 
 export function AssessmentView() {
-  const { me } = useAccount();
+  const { me, promptUpgrade } = useAccount();
   const lang = me.profile.lang;
   const language = getLanguage(lang);
   const history = useStore("checkpoints").filter((c) => c.lang === lang);
@@ -210,7 +211,12 @@ export function AssessmentView() {
               {left < 3 && (
                 <p className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
                   You have {Math.max(0, left)} recording{left === 1 ? "" : "s"} left today, and the full scan uses 3.
-                  You can still preview the scan or upgrade for more recordings.
+                  Come back at {resetTimeLabel()} to take it in one go, so you never stop halfway.{" "}
+                  {me.billing && me.plan === "free" && (
+                    <button type="button" className="underline underline-offset-4" onClick={() => promptUpgrade("limit")}>
+                      Or see what Plus allows
+                    </button>
+                  )}
                 </p>
               )}
 
@@ -218,6 +224,7 @@ export function AssessmentView() {
                 <Button
                   size="lg"
                   className="rounded-full"
+                  disabled={left < 3}
                   onClick={() => setRun({ lang, takes: [], step: 0, saved: null, resultIndex: 0 })}
                 >
                   Start 3-part assessment

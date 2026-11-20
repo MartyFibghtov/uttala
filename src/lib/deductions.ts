@@ -1,7 +1,7 @@
 /**
  * Score by deduction: every sentence starts at 100 and every mistake the checks catch costs points.
  *
- * The evidence comes from the on-device sound model (gop.ts: each expected sound's confidence on the
+ * The evidence comes from the sound model (gop.ts: each expected sound's confidence on the
  * learner's audio), the engine's word verdicts (Azure / ElevenLabs) and the prosody comparison
  * (prosody.ts: pauses, rhythm, melody against the native reading). Nothing is averaged away: three
  * wrong sounds cost three times one wrong sound, whatever the rest of the sentence did.

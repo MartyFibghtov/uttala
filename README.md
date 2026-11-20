@@ -54,14 +54,20 @@ Engines bill by the second of audio and the character of text, so short takes ke
 
 ## Going live
 
-1. **Host and database.** Deploy to any Node host that runs Next.js (Vercel works as is). Create a hosted libSQL database (for example Turso) and set `DATABASE_URL` and `DATABASE_AUTH_TOKEN`. A local file database does not survive serverless deployments.
-2. **Secrets.** Set `ELEVENLABS_API_KEY`, `BETTER_AUTH_SECRET` (`openssl rand -hex 32`), `BETTER_AUTH_URL` and `NEXT_PUBLIC_SITE_URL` (your https address). Store keys in your host's secret manager, not in the repository.
+SayClear deploys to [Railway](https://railway.com) from the `Dockerfile`: a single web service with the SQLite database on a volume at `/data`, plus a small cron service for reminder emails. **Follow [docs/deploy-railway.md](docs/deploy-railway.md)** for the click-by-click guide, the full variable table, DNS, the smoke test and backups.
+
+Other launch documents: [docs/product-review.md](docs/product-review.md) (positioning, plans, upsell rules, what is left for the founder), [docs/stripe-launch-checklist.md](docs/stripe-launch-checklist.md) (Stripe sandbox to live, Dashboard settings, test cards), [docs/marketing-plan.md](docs/marketing-plan.md) (positioning, organic plan, 1000 SEK/month ad plan) and [e2e/README.md](e2e/README.md) (end-to-end tests: `pnpm e2e`).
+
+In short:
+
+1. **Service and volume.** Create a Railway project from the GitHub repo, add a volume mounted at `/data`, set the healthcheck path to `/api/health` and keep one replica. The database lives at `/data/sayclear.db`. (Any Node host also works: set `DATABASE_URL` and `DATABASE_AUTH_TOKEN` for a hosted libSQL database such as Turso.)
+2. **Secrets.** Set `ELEVENLABS_API_KEY`, `OPENAI_API_KEY`, `BETTER_AUTH_SECRET` (`openssl rand -hex 32`), `BETTER_AUTH_URL` and `NEXT_PUBLIC_SITE_URL` (your https address). The 240 MB sound model is baked into the image and runs on the server: give the service at least 2 GB RAM and 2 vCPU.
 3. **Stripe.**
    - Create a restricted key (`rk_…`) and set it as `STRIPE_SECRET_KEY`.
    - Run `pnpm stripe:setup --webhook https://your.site`. It creates the two products, four prices, the portal configuration and the webhook endpoint, and prints `STRIPE_PORTAL_CONFIGURATION` and `STRIPE_WEBHOOK_SECRET` to add to your environment.
    - Do this once in a sandbox and once in live mode. To test webhooks locally: `stripe listen --forward-to localhost:3000/api/stripe/webhook`.
    - Tax: Stripe collects no tax until you register in Stripe Tax. After registering, set `STRIPE_AUTOMATIC_TAX=true`. See [Collect taxes for recurring payments](https://docs.stripe.com/billing/taxes/collect-taxes).
-4. **Email.** Set `RESEND_API_KEY` and `EMAIL_FROM` so password-reset emails are delivered. Until then, reset links only appear in the server log.
+4. **Email and reminders.** Set `RESEND_API_KEY` and `EMAIL_FROM` so password-reset emails are delivered (until then, reset links only appear in the server log). Add a Railway cron service that calls `/api/cron/reminders` daily with `CRON_SECRET`.
 5. **Voices.** Add at least one native voice per language you want to promote to your ElevenLabs account ("My Voices"). Voices are matched by their language label; without a native voice the app falls back to a multilingual one and says so in the picker.
 6. **Legal.** Set `NEXT_PUBLIC_COMPANY_NAME` and `NEXT_PUBLIC_CONTACT_EMAIL`, then have `/terms` and `/privacy` (`src/components/legal.tsx`) reviewed for your jurisdiction. They are a sound starting point, not legal advice.
 7. **Optional.** `AZURE_SPEECH_KEY` and `AZURE_SPEECH_REGION` switch on sound-by-sound scoring and the Pro plan. `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` add "Continue with Google".
