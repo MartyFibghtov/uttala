@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
 import { Pricing } from "@/components/pricing";
+import { pageMetadata } from "@/lib/site";
 
-export const metadata: Metadata = {
-  title: "Pricing",
+export const metadata: Metadata = pageMetadata({
+  title: "Pricing: start free, upgrade for more practice",
   description: "Start free with five analysed recordings a day. Upgrade for more practice, rhythm and melody feedback, and sound-by-sound scoring.",
-};
+  path: "/pricing",
+});
 
 export default function PricingPage() {
   return (

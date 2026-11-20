@@ -36,6 +36,7 @@ import { WordCompareControls } from "@/components/word-compare";
 import {
   hear,
   loadReference,
+  postAssess,
   scoreColor,
   speakWithBrowser,
   UpgradeNeeded,
@@ -45,7 +46,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAccount } from "@/hooks/use-account";
-import { MAX_RECORDING_SECONDS, useRecorder } from "@/hooks/use-recorder";
+import { isSilent, MAX_RECORDING_SECONDS, recorderErrorMessage, SILENT_MESSAGE, useRecorder } from "@/hooks/use-recorder";
 import {
   decodeToMono16k,
   encodeWav,
@@ -64,7 +65,7 @@ import {
 import { LEVELS, statusFor, type LevelId } from "@/lib/levels";
 import { enrichWordDiagnostics, extractFocusSounds, segmentWordToPhonemes } from "@/lib/phonetics";
 import { compareProsody, fallbackProsody, overallScore } from "@/lib/prosody";
-import { preloadRatingModel, rateWithDeductions } from "@/lib/rating";
+import { rateWithDeductions } from "@/lib/rating";
 import { SCORE_BANDS } from "@/lib/score-bands";
 import { soundForIpa, soundsFor } from "@/lib/sounds";
 import { recordAttempt } from "@/lib/store";
@@ -818,10 +819,6 @@ export function DiagnosticStageRecorder({
   const outOfRecordings = me.usage.used >= me.usage.limit;
 
   useEffect(() => stopPlayback, []);
-  // Fetch the sound model early so it is ready by the first recording (about 240 MB, once).
-  useEffect(() => {
-    preloadRatingModel().catch(() => undefined);
-  }, []);
 
   // Preload reference audio in the background so it is ready by the time the learner finishes recording.
   useEffect(() => {
@@ -864,7 +861,11 @@ export function DiagnosticStageRecorder({
       try {
         const samples = await decodeToMono16k(blob);
         if (samples.length < SAMPLE_RATE * 0.4) {
-          toast.error("That was too short. Please read the full sentence.");
+          toast.error("That was too short. Please read the full sentence. This did not use a recording.");
+          return;
+        }
+        if (isSilent(samples)) {
+          toast.error(SILENT_MESSAGE);
           return;
         }
         const wav = encodeWav(samples);
@@ -877,13 +878,7 @@ export function DiagnosticStageRecorder({
         const refPromise = live
           ? loadReference(prompt.text.trim(), lang, DIAGNOSTIC_SCORING_LEVEL).catch(() => null)
           : Promise.resolve(null);
-        const res = await fetch("/api/assess", { method: "POST", body: form });
-        const engine = (await res.json()) as AssessResult & { error?: string; upgrade?: "limit" | "customText" };
-        if (engine.upgrade) {
-          promptUpgrade(engine.upgrade);
-          return;
-        }
-        if (!res.ok) throw new Error(engine.error ?? "Assessment failed.");
+        const engine = await postAssess(form);
         noteAnalysis();
 
         // The deduction rating needs the native reading; wait for it, but not indefinitely.
@@ -891,7 +886,7 @@ export function DiagnosticStageRecorder({
           refPromise,
           new Promise<null>((resolve) => setTimeout(() => resolve(null), 15000)),
         ]);
-        // Main rating: score by deduction from the on-device sound model (src/lib/rating.ts).
+        // Main rating: score by deduction from the sound model (src/lib/rating.ts).
         const rated = await rateWithDeductions(samples, engine, reference, lang);
         const data = rated.result;
 
@@ -946,7 +941,8 @@ export function DiagnosticStageRecorder({
           reference,
         });
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Could not analyse that recording.");
+        if (err instanceof UpgradeNeeded) promptUpgrade(err.reason);
+        else toast.error(err instanceof Error ? err.message : "Could not analyse that recording.");
       } finally {
         setBusy(false);
       }
@@ -969,8 +965,8 @@ export function DiagnosticStageRecorder({
     stopPlayback();
     try {
       await recorder.start();
-    } catch {
-      toast.error("Microphone access is needed to record. Allow it in your browser and try again.");
+    } catch (err) {
+      toast.error(recorderErrorMessage(err));
     }
   };
 
@@ -1951,13 +1947,7 @@ export function WordPracticeLessonScreen({
         form.append("lang", lang);
         form.append("level", DIAGNOSTIC_SCORING_LEVEL);
 
-        const res = await fetch("/api/assess", { method: "POST", body: form });
-        const data = (await res.json()) as AssessResult & { error?: string; upgrade?: "limit" | "customText" };
-        if (data.upgrade) {
-          promptUpgrade(data.upgrade);
-          return;
-        }
-        if (!res.ok) throw new Error(data.error ?? "Assessment failed.");
+        const data = await postAssess(form);
         noteAnalysis();
 
         const scoredWord = data.words[0] ?? {
@@ -1982,7 +1972,8 @@ export function WordPracticeLessonScreen({
           },
         }));
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Could not score that word.");
+        if (err instanceof UpgradeNeeded) promptUpgrade(err.reason);
+        else toast.error(err instanceof Error ? err.message : "Could not score that word.");
       } finally {
         setBusy(false);
       }

@@ -47,7 +47,7 @@ export interface WordResult {
    */
   phonemesMeasured?: boolean;
   /**
-   * The on-device comparison with a native reading of the same text, when the precise sound check ran.
+   * The comparison with a native reading of the same text, when the precise sound check ran.
    * `match` is 0–100; each issue is a native sound the learner replaced (`heard`) or left out (null).
    */
   native?: { match: number; ref: string; heard: string; issues: { ref: string; heard: string | null }[] };
@@ -92,7 +92,7 @@ export interface AssessResult {
   focusSounds?: FocusSound[];
   /**
    * Score by deduction (src/lib/rating.ts): 100 minus every caught mistake. When present it is the
-   * recording's overall score; absent when the on-device sound model could not run.
+   * recording's overall score; absent when the sound model could not run.
    */
   deduction?: { score: number; items: Deduction[] };
 }

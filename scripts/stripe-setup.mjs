@@ -7,8 +7,9 @@
 // Reads STRIPE_SECRET_KEY from the environment or .env.local. Run it once against
 // a sandbox and once against live mode.
 //
-// Keep the amounts and event list in sync with src/lib/plans.ts and
-// WEBHOOK_EVENTS in src/lib/server/stripe.ts.
+// Keep the USD amounts in sync with src/lib/plans.ts, and the event list below
+// (duplicated here because this is plain .mjs) with WEBHOOK_EVENTS in
+// src/lib/server/stripe.ts.
 
 import { existsSync, readFileSync } from "node:fs";
 import Stripe from "stripe";
@@ -24,7 +25,7 @@ if (!key) {
   console.error("Set STRIPE_SECRET_KEY (in .env.local or the environment) first.");
   process.exit(1);
 }
-const stripe = new Stripe(key);
+const stripe = new Stripe(key, { maxNetworkRetries: 2 });
 const live = key.includes("_live_");
 console.log(`Stripe ${live ? "LIVE" : "test"} mode\n`);
 
@@ -36,6 +37,8 @@ const PLANS = [
     description: "60 analysed recordings a day, your own texts, rhythm and melody feedback, choice of voices.",
     month: 999,
     year: 7999,
+    // Minor units. Checkout shows the buyer's local currency when one is defined here.
+    options: { sek: { month: 9900, year: 79900 }, eur: { month: 999, year: 7999 } },
   },
   {
     id: "sayclear_pro",
@@ -44,6 +47,7 @@ const PLANS = [
     description: "Everything in Plus, sound-by-sound scoring and 250 analysed recordings a day.",
     month: 1999,
     year: 14999,
+    options: { sek: { month: 19900, year: 149000 }, eur: { month: 1999, year: 14999 } },
   },
 ];
 
@@ -78,16 +82,27 @@ async function ensureProduct(p) {
 async function ensurePrice(p, interval) {
   const lookup = `sayclear_${p.plan}_${interval}ly`;
   const amount = p[interval];
-  const existing = (await stripe.prices.list({ lookup_keys: [lookup], active: true, limit: 1 })).data[0];
-  if (existing && existing.unit_amount === amount && existing.recurring?.interval === interval) {
+  const options = Object.fromEntries(
+    Object.entries(p.options).map(([cur, a]) => [cur, { unit_amount: a[interval], tax_behavior: "unspecified" }]),
+  );
+  const existing = (await stripe.prices.list({ lookup_keys: [lookup], active: true, limit: 1, expand: ["data.currency_options"] })).data[0];
+  const same =
+    existing &&
+    existing.currency === "usd" &&
+    existing.unit_amount === amount &&
+    existing.recurring?.interval === interval &&
+    Object.entries(options).every(([cur, o]) => existing.currency_options?.[cur]?.unit_amount === o.unit_amount) &&
+    Object.keys(existing.currency_options ?? {}).filter((c) => c !== "usd").length === Object.keys(options).length;
+  if (same) {
     console.log(`price ${lookup}: ok (${existing.id})`);
     return existing.id;
   }
-  // Prices are immutable: create a new one and move the lookup key to it.
+  // Prices are immutable (apart from currency options): create a new one and move the lookup key to it.
   const price = await stripe.prices.create({
     product: p.id,
     currency: "usd",
     unit_amount: amount,
+    currency_options: options,
     recurring: { interval },
     lookup_key: lookup,
     transfer_lookup_key: true,
@@ -111,7 +126,15 @@ const portalSettings = {
     customer_update: { enabled: true, allowed_updates: ["email", "address", "name"] },
     invoice_history: { enabled: true },
     payment_method_update: { enabled: true },
-    subscription_cancel: { enabled: true, mode: "at_period_end" },
+    subscription_cancel: {
+      enabled: true,
+      mode: "at_period_end",
+      proration_behavior: "none",
+      cancellation_reason: {
+        enabled: true,
+        options: ["too_expensive", "missing_features", "switched_service", "unused", "too_complex", "low_quality", "other"],
+      },
+    },
     subscription_update: {
       enabled: true,
       default_allowed_updates: ["price"],
@@ -148,10 +171,17 @@ if (flag > -1) {
   }
 }
 
-console.log("\nAdd these to your environment:");
+console.log("\nEnvironment variables for SayClear (set them in your host, never commit them):");
+console.log("STRIPE_SECRET_KEY=…              prefer a restricted key (rk_…); see docs/stripe-launch-checklist.md");
 console.log(`STRIPE_PORTAL_CONFIGURATION=${portal.id}`);
 if (webhookSecret) {
   console.log(`STRIPE_WEBHOOK_SECRET=${webhookSecret}   <- shown only once; store it as a secret`);
 } else if (flag === -1) {
-  console.log("STRIPE_WEBHOOK_SECRET=…   from `stripe listen` locally, or re-run with --webhook https://your.site");
+  console.log("STRIPE_WEBHOOK_SECRET=…          from `stripe listen` locally, or re-run with --webhook https://your.site");
+} else {
+  console.log("STRIPE_WEBHOOK_SECRET=…          unchanged: Dashboard > Developers > Webhooks > your endpoint > Reveal");
 }
+console.log("STRIPE_AUTOMATIC_TAX=true        only after Stripe Tax registrations are active (optional)");
+console.log("STRIPE_ADAPTIVE_PRICING=true     optional; leave unset, prices already carry USD/SEK/EUR");
+console.log("\nDashboard settings that cannot be set via API (trial-ending emails, Smart Retries, receipts, Radar, tax):");
+console.log("see docs/stripe-launch-checklist.md");

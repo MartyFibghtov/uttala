@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { PageHeader } from "@/components/app-shell";
 import { ArtworkFrame } from "@/components/artwork";
 import { LanguagePicker, VoicePicker, useVoiceId } from "@/components/pickers";
+import { UpgradeCard, useNudge } from "@/components/pricing";
 import { hear, PracticeSession, scoreColor } from "@/components/practice-session";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -44,8 +45,49 @@ function dueLabel(w: WeakWord): string {
   return days <= 0 ? `${check} due now` : `${check} in ${days} day${days === 1 ? "" : "s"}`;
 }
 
+function DrillCapNote({ cap, lang, full }: { cap: number; lang: string; full: boolean }) {
+  const { me } = useAccount();
+  const leftOut = useStore("leftOut").filter((w) => w.lang === lang);
+  const nudge = useNudge("drills", full && leftOut.length > 0);
+  if (nudge.visible) {
+    return (
+      <UpgradeCard
+        title={`Your drill list is full at ${cap} words`}
+        currentPlan={me.plan}
+        trialAvailable={me.trialAvailable}
+        onDismiss={nudge.dismiss}
+      >
+        <p>
+          Left out so far:{" "}
+          <span className="font-medium text-foreground" lang={lang}>
+            {leftOut.slice(0, 6).map((w) => w.text).join(", ")}
+          </span>
+          {leftOut.length > 6 ? ` and ${leftOut.length - 6} more` : ""}. Master a word and a slot opens up for the next
+          one. Plus has no limit, so none of them are left out.
+        </p>
+      </UpgradeCard>
+    );
+  }
+  return (
+    <p className="text-xs text-muted-foreground">
+      The free plan keeps your {cap} weakest words
+      {leftOut.length > 0 && (
+        <>
+          {" "}
+          (left out:{" "}
+          <span lang={lang}>
+            {leftOut.slice(0, 4).map((w) => w.text).join(", ")}
+          </span>
+          )
+        </>
+      )}
+      . Plus keeps them all.
+    </p>
+  );
+}
+
 function WordDrills({ lang }: { lang: string }) {
-  const { me, promptUpgrade } = useAccount();
+  const { me } = useAccount();
   const level = me.profile.level;
   const cap = me.entitlements.maxDrillWords;
   const voiceId = useVoiceId();
@@ -250,14 +292,7 @@ function WordDrills({ lang }: { lang: string }) {
             </>
           }
         />
-        {cap !== null && me.billing && (
-          <p className="text-xs text-muted-foreground">
-            The free plan keeps your {cap} weakest words.{" "}
-            <button type="button" className="underline underline-offset-4" onClick={() => promptUpgrade("limit")}>
-              Keep them all with Plus
-            </button>
-          </p>
-        )}
+        {cap !== null && me.billing && <DrillCapNote cap={cap} lang={lang} full={weak.length >= cap} />}
       </div>
     </div>
   );
@@ -293,7 +328,7 @@ function Sounds({ lang }: { lang: string }) {
   if (!me.entitlements.phonemes) {
     return (
       <Empty title="Find the exact sounds that hold you back">
-        Pro scores every sound inside every word and keeps a running list of your weakest ones.
+        Pro adds server sound-by-sound scores for English and keeps a running list of your weakest sounds. In other languages the free precise sound check already compares each sound with a native reading.
         <span className="mt-4 flex flex-wrap justify-center gap-2">
           <Button className="rounded-full" onClick={() => promptUpgrade("phonemes")}>
             See Pro

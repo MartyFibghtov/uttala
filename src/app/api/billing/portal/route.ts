@@ -1,3 +1,4 @@
+import { configuredOrigin } from "@/lib/site";
 import { getUser, unauthorized } from "@/lib/server/account";
 import { portalUrl, stripeEnabled } from "@/lib/server/stripe";
 
@@ -7,7 +8,7 @@ export async function POST(request: Request) {
   if (!user) return unauthorized();
   if (!stripeEnabled()) return Response.json({ error: "Payments are not available yet." }, { status: 503 });
   try {
-    const origin = process.env.BETTER_AUTH_URL ?? new URL(request.url).origin;
+    const origin = configuredOrigin(request);
     return Response.json({ url: await portalUrl(user.id, origin) });
   } catch (err) {
     console.error("portal failed", err);

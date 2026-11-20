@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { ArrowLeft, ArrowRight, Check, Ear, Music, Sparkles, Timer, Volume2 } from "lucide-react";
 import { toast } from "sonner";
-import { Logo } from "@/components/app-shell";
+import { Logo } from "@/components/logo";
 import {
   buildSimulatedTake,
   DiagnosticStageRecorder,
@@ -246,7 +246,12 @@ export function Onboarding() {
       intelligibility: avgIntel,
       recommended: rank.recommended,
     });
-    await updateProfile({ onboarded: true });
+    const saved = await updateProfile({ onboarded: true });
+    if (!saved) {
+      setFinishing(false);
+      toast.error("We could not save your setup. Check your connection and try again.");
+      return;
+    }
     router.replace("/home");
   };
 

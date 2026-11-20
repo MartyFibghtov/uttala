@@ -1,12 +1,20 @@
 import { isLanguage, isLibraryText } from "@/lib/languages";
 import { isLevel } from "@/lib/levels";
 import { consumeVoiceChars, getAccess, getUser, unauthorized } from "@/lib/server/account";
+import { db } from "@/lib/server/db";
 import { cachedSpeech, hasElevenLabs, pickVoice, synthesize } from "@/lib/server/elevenlabs";
 import { isGeneratedText } from "@/lib/server/openai";
 import { SHORT } from "@/lib/short";
 import { tokenize } from "@/lib/text";
 
 export const maxDuration = 60;
+
+async function refundVoiceChars(userId: string, chars: number) {
+  await db().execute({
+    sql: "UPDATE usage SET voice_chars = MAX(0, voice_chars - ?) WHERE user_id = ? AND day = ?",
+    args: [chars, userId, new Date().toISOString().slice(0, 10)],
+  });
+}
 
 /** Reference reading of a text, with per-character timings. */
 export async function POST(request: Request) {
@@ -52,9 +60,19 @@ export async function POST(request: Request) {
         { status: 429 },
       );
     }
-    return Response.json(await synthesize(text, voice, library || generated, lang));
+    const counted = !library && !generated;
+    try {
+      return Response.json(await synthesize(text, voice, library || generated, lang));
+    } catch (err) {
+      // The reading was not produced, so it must not eat into the daily allowance.
+      if (counted) await refundVoiceChars(user.id, text.length).catch(() => undefined);
+      throw err;
+    }
   } catch (err) {
     console.error("tts failed", err);
-    return Response.json({ error: "We could not load the reference voice. Please try again." }, { status: 502 });
+    return Response.json(
+      { error: "The reference voice is not answering right now. Your recording and allowance are unaffected; please try again in a moment." },
+      { status: 502 },
+    );
   }
 }

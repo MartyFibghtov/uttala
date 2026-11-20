@@ -4,7 +4,9 @@ import { usePathname, useRouter } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Orb } from "@/components/orb";
 import { Pricing } from "@/components/pricing";
+import { resetTimeLabel } from "@/lib/plans";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { navigate } from "@/lib/auth-client";
 import { setStoreUser, startSync } from "@/lib/store";
 import type { Me, Profile } from "@/lib/types";
 
@@ -13,7 +15,7 @@ export type UpgradeReason = "limit" | "customText" | "voice" | "prosody" | "phon
 const UPGRADE_COPY: Record<UpgradeReason, { title: string; body: string }> = {
   limit: {
     title: "That's today's recordings used up",
-    body: "Your allowance resets at midnight UTC. Upgrade to keep practising now, with up to 60 recordings a day.",
+    body: `Your allowance resets at ${resetTimeLabel()} your time (midnight UTC). Listening, ear training and your drill list stay open meanwhile. Plus allows up to 60 recordings a day.`,
   },
   customText: {
     title: "Practise the words you actually need",
@@ -28,15 +30,16 @@ const UPGRADE_COPY: Record<UpgradeReason, { title: string; body: string }> = {
     body: "Compare how your pitch rises and falls with a native voice, word by word. It is what makes speech sound natural.",
   },
   phonemes: {
-    title: "Score every single sound",
-    body: "See exactly which sound inside a word is off, and track your weakest sounds over time.",
+    title: "Sound-by-sound scores for English",
+    body: "For English, see exactly which sound inside a word is off and track your weakest sounds over time. Other languages already get the free sound check on every plan.",
   },
 };
 
 interface AccountState {
   me: Me;
   refresh: () => Promise<void>;
-  updateProfile: (patch: Partial<Profile>) => Promise<void>;
+  /** Resolves false when the server did not accept the change (the account is reloaded). */
+  updateProfile: (patch: Partial<Profile>) => Promise<boolean>;
   /** Count one analysis locally so the meter moves without a round trip. */
   noteAnalysis: () => void;
   promptUpgrade: (reason: UpgradeReason) => void;
@@ -67,7 +70,7 @@ export function AccountProvider({ children }: { children: ReactNode }) {
 
   const apply = useCallback((next: Me | null) => {
     if (!next) {
-      window.location.assign("/sign-in");
+      navigate("/sign-in");
       return;
     }
     setStoreUser(next.user.id);
@@ -113,8 +116,12 @@ export function AccountProvider({ children }: { children: ReactNode }) {
           method: "PATCH",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(patch),
-        });
-        if (!res.ok) await load();
+        }).catch(() => null);
+        if (!res?.ok) {
+          await load();
+          return false;
+        }
+        return true;
       },
       noteAnalysis: () => setMe((m) => (m ? { ...m, usage: { ...m.usage, used: m.usage.used + 1 } } : m)),
       promptUpgrade: setUpgrade,

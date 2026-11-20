@@ -100,6 +100,8 @@ export function Privacy() {
         <li>
           <strong>Voice recordings</strong>: when you press Record, the audio is sent to our speech-analysis
           providers, scored, and then discarded. We do not keep your recordings and do not use them to identify you.
+          The precise sound check runs on our own server: the recording is processed in memory to compute your sound
+          scores and is not stored.
         </li>
         <li>
           <strong>Practice data</strong>: the texts you practise and save, your scores, your daily activity (points,
@@ -115,6 +117,12 @@ export function Privacy() {
           <strong>Billing data</strong>: if you subscribe, Stripe processes your payment details. We receive your plan,
           its status and renewal date, never your full card number.
         </li>
+        <li>
+          <strong>Trial-abuse prevention</strong>: if you delete your account, we keep a one-way HMAC hash of your email
+          address, solely to stop the same address from claiming repeat free trials. It cannot be reversed to your
+          address. The basis is our legitimate interest (GDPR Art. 6(1)(f)). We keep it for as long as the service runs
+          or until you ask us to remove it; removing it may make you eligible for another trial.
+        </li>
       </ul>
       <p>
         We process this data to perform our contract with you, and, for security and abuse prevention, on the basis of
@@ -123,10 +131,12 @@ export function Privacy() {
       <h2>Who processes data for us</h2>
       <ul>
         <li>ElevenLabs: speech recognition, alignment and reference voices.</li>
-        <li>Microsoft Azure: sound-by-sound scoring, where that feature is active.</li>
+        <li>Microsoft Azure Speech: optional sound-by-sound scoring, where that feature is active.</li>
+        <li>OpenAI: text generation.</li>
         <li>Stripe: payments and invoices.</li>
+        <li>Resend: email delivery.</li>
+        <li>Railway: our hosting provider.</li>
         <li>Google: optional sign-in authentication, when you choose “Continue with Google”.</li>
-        <li>Our hosting, database and email providers.</li>
       </ul>
       <p>
         These providers may process data outside your country, including in the United States, under contractual
@@ -140,7 +150,7 @@ export function Privacy() {
       <h2>How long we keep it</h2>
       <p>
         Account and practice data are kept until you delete your account. Billing records are kept for as long as tax
-        law requires. Recordings are not kept.
+        law requires. The trial-abuse hash is kept as described above. Recordings are not kept.
       </p>
       <h2>Your rights</h2>
       <p>

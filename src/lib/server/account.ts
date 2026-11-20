@@ -7,7 +7,7 @@ import { hasAzure } from "./azure";
 import { db, first } from "./db";
 import { hasElevenLabs, listVoices } from "./elevenlabs";
 import { hasOpenAi } from "./openai";
-import { getSubscriptionRow, planOf, stripeEnabled } from "./stripe";
+import { getSubscriptionRow, planOf, stripeEnabled, trialOffered } from "./stripe";
 
 export interface SessionUser {
   id: string;
@@ -102,7 +102,10 @@ export async function buildMe(user: SessionUser): Promise<Me> {
     getSubscriptionRow(user.id),
     analysesToday(user.id),
   ]);
-  const voices = hasElevenLabs() ? await listVoices().catch(() => []) : [];
+  const [voices, trialAvailable] = await Promise.all([
+    hasElevenLabs() ? listVoices().catch(() => []) : Promise.resolve([]),
+    trialOffered(!!row?.trial_used, user.email),
+  ]);
   return {
     user,
     profile,
@@ -118,7 +121,7 @@ export async function buildMe(user: SessionUser): Promise<Me> {
             cancelAtPeriodEnd: !!row.cancel_at_period_end,
           }
         : null,
-    trialAvailable: !row?.trial_used,
+    trialAvailable,
     billing: stripeEnabled(),
     engines: { elevenlabs: hasElevenLabs(), azure: hasAzure() || hasOpenAi(), openai: hasOpenAi() },
     voices,

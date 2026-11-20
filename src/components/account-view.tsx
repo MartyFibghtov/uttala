@@ -24,12 +24,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAccount } from "@/hooks/use-account";
-import { authClient } from "@/lib/auth-client";
+import { authClient, navigate } from "@/lib/auth-client";
 import { LEVELS } from "@/lib/levels";
-import { PLANS } from "@/lib/plans";
+import { PLANS, resetTimeLabel } from "@/lib/plans";
 import { ReminderToggle } from "@/components/community-view";
-import { onModelProgress, preloadRatingModel } from "@/lib/rating";
-import { SOUND_CHECK_DOWNLOAD_MB } from "@/lib/sound-check";
 import { ThemePicker } from "@/components/theme";
 import { GOALS } from "@/lib/gamification";
 import { clearProgress, exportProgress, setSettings, useStore } from "@/lib/store";
@@ -65,7 +63,9 @@ function DeleteAccount({ hasPassword }: { hasPassword: boolean }) {
     setBusy(true);
     setError(null);
     setNeedsFreshSession(false);
-    const { error } = await authClient.deleteUser(hasPassword ? { password: confirmation } : {});
+    const { error } = await authClient
+      .deleteUser(hasPassword ? { password: confirmation } : {})
+      .catch(() => ({ error: { code: "NETWORK", message: "Could not reach the server. Check your connection and try again." } }));
     if (error) {
       const freshNeeded = !hasPassword && (error.code === "SESSION_EXPIRED" || /fresh|expired/i.test(error.message ?? ""));
       setNeedsFreshSession(freshNeeded);
@@ -78,7 +78,7 @@ function DeleteAccount({ hasPassword }: { hasPassword: boolean }) {
       return;
     }
     clearProgress();
-    window.location.assign("/");
+    navigate("/");
   };
 
   return (
@@ -120,7 +120,7 @@ function DeleteAccount({ hasPassword }: { hasPassword: boolean }) {
               variant="outline"
               size="sm"
               className="mt-1 rounded-full"
-              onClick={() => void authClient.signIn.social({ provider: "google", callbackURL: "/account" })}
+              onClick={() => void authClient.signIn.social({ provider: "google", callbackURL: "/account", errorCallbackURL: "/account" })}
             >
               <GoogleMark />
               Re-authenticate with Google
@@ -173,33 +173,12 @@ const SHORTCUTS: [string, string][] = [
 ];
 
 function SoundCheckToggle() {
-  const [progress, setProgress] = useState<number | null>(null);
-  const [done, setDone] = useState(false);
-  const download = async () => {
-    setProgress(0);
-    try {
-      const off = onModelProgress((f) => setProgress(f));
-      await preloadRatingModel().finally(off);
-      setDone(true);
-      toast.success("The sound model is ready on this device.");
-    } catch {
-      toast.error("The sound model could not be downloaded. Check your connection and try again.");
-    } finally {
-      setProgress(null);
-    }
-  };
   return (
-    <div className="flex flex-wrap items-center justify-between gap-4">
-      <p className="max-w-xl text-sm text-muted-foreground">
-        Every recording is rated by deduction: it starts at 100 and each wrong sound, unclear word, extra pause or
-        off rhythm and melody costs points. The sounds are checked by a model that runs on this device: a one-time
-        download of about {SOUND_CHECK_DOWNLOAD_MB} MB, and your recordings stay here for this step. It downloads on
-        your first recording; you can fetch it now instead.
-      </p>
-      <Button variant="outline" className="rounded-full" onClick={download} disabled={progress !== null || done}>
-        {progress !== null ? `Downloading ${Math.round(progress * 100)}%` : done ? "Ready" : "Download now"}
-      </Button>
-    </div>
+    <p className="max-w-xl text-sm text-muted-foreground">
+      Every recording is rated by deduction: it starts at 100 and each wrong sound, unclear word, extra pause or off
+      rhythm and melody costs points. The precise sound check runs on our server, on every plan: your recording is
+      analysed in memory and not stored. There is nothing to download.
+    </p>
   );
 }
 
@@ -241,9 +220,14 @@ export function AccountView() {
     handled.current = true;
     void (async () => {
       if (checkout === "success") {
-        await fetch("/api/billing/sync", { method: "POST" }).catch(() => undefined);
+        const synced = await fetch("/api/billing/sync", { method: "POST" })
+          .then((r) => r.ok)
+          .catch(() => false);
         await refresh();
-        toast.success("You're all set. Your new plan is active.");
+        if (synced) toast.success("You're all set. Your new plan is active.");
+        else toast.message("Thanks. Your payment went through; your plan can take a minute to show. Refresh if it does not.");
+      } else if (checkout === "cancel" || checkout === "cancelled") {
+        toast.message("Checkout cancelled. You have not been charged.");
       }
       router.replace("/account");
     })();
@@ -259,20 +243,36 @@ export function AccountView() {
     }
   };
 
-  const download = () => {
-    const blob = new Blob([JSON.stringify({ account: me.user, profile: me.profile, ...exportProgress() }, null, 2)], {
-      type: "application/json",
-    });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "sayclear-data.json";
-    a.click();
-    URL.revokeObjectURL(a.href);
+  const [exporting, setExporting] = useState(false);
+  const download = async () => {
+    setExporting(true);
+    try {
+      const res = await fetch("/api/me/export");
+      if (!res.ok) throw new Error("Could not prepare your data.");
+      const server = (await res.json()) as Record<string, unknown>;
+      // The server copy is the record; this device's copy is included in case it is newer.
+      const blob = new Blob([JSON.stringify({ ...server, thisDevice: exportProgress() }, null, 2)], {
+        type: "application/json",
+      });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "sayclear-data.json";
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not download your data.");
+    } finally {
+      setExporting(false);
+    }
   };
 
   const signOut = async () => {
-    await authClient.signOut();
-    window.location.assign("/");
+    try {
+      await authClient.signOut();
+    } catch {
+      // Leave anyway; the server session expires on its own.
+    }
+    navigate("/");
   };
 
   const hasPassword = providers ? providers.includes("credential") : true;
@@ -307,7 +307,7 @@ export function AccountView() {
               <span className="font-medium tabular-nums">
                 {Math.max(0, me.usage.limit - me.usage.used)} of {me.usage.limit}
               </span>{" "}
-              <span className="text-muted-foreground">recordings left today. Resets at midnight UTC.</span>
+              <span className="text-muted-foreground">recordings left today. Resets at {resetTimeLabel()} your time (midnight UTC).</span>
             </p>
             {me.subscription && (
               <Button variant="outline" className="rounded-full" onClick={manage} disabled={opening}>
@@ -417,8 +417,8 @@ export function AccountView() {
               </div>
             )}
             <div className="flex flex-wrap gap-2">
-              <Button variant="outline" className="rounded-full" onClick={download}>
-                <Download />
+              <Button variant="outline" className="rounded-full" onClick={() => void download()} disabled={exporting}>
+                {exporting ? <Loader2 className="animate-spin" /> : <Download />}
                 Download my data
               </Button>
               <Button variant="outline" className="rounded-full" onClick={signOut}>

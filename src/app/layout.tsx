@@ -3,29 +3,23 @@ import { Geist_Mono, Inter } from "next/font/google";
 import { TestEnvBanner } from "@/components/test-env-banner";
 import { ThemeProvider } from "@/components/theme";
 import { Toaster } from "@/components/ui/sonner";
+import { LANGUAGES } from "@/lib/languages";
 import { SITE } from "@/lib/site";
 import "./globals.css";
 
 const inter = Inter({ variable: "--font-inter", subsets: ["latin", "latin-ext", "cyrillic"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
+const TITLE = `${SITE.name}: Pronunciation practice with feedback in ${LANGUAGES.length} languages`;
+
 export const metadata: Metadata = {
   metadataBase: new URL(SITE.url),
-  title: { default: "SayClear · Sound clear, then sound native", template: "%s · SayClear" },
+  title: { default: TITLE, template: `%s · ${SITE.name}` },
   description: SITE.description,
-  openGraph: {
-    title: "SayClear · Sound clear, then sound native",
-    description: SITE.description,
-    siteName: SITE.name,
-    type: "website",
-    images: [{ url: "/images/hero-acoustic.jpg", width: 1376, height: 768, alt: "SayClear acoustic waves" }],
-  },
-  twitter: {
-    card: "summary_large_image",
-    title: "SayClear · Sound clear, then sound native",
-    description: SITE.description,
-    images: ["/images/hero-acoustic.jpg"],
-  },
+  applicationName: SITE.name,
+  // Social images come from the opengraph-image file convention (root, language and sound routes).
+  openGraph: { siteName: SITE.name, type: "website", locale: "en_US", title: TITLE, description: SITE.description },
+  twitter: { card: "summary_large_image", title: TITLE, description: SITE.description },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

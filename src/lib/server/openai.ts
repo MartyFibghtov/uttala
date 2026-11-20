@@ -7,7 +7,7 @@ import { tokenize } from "../text";
 import type { Attempt, GeneratedText, ListeningTally, PhonemeResult, WeakPhoneme, WeakWord } from "../types";
 import { db, first, query } from "./db";
 
-const BASE = "https://api.openai.com/v1";
+const BASE = process.env.OPENAI_API_BASE ?? "https://api.openai.com/v1";
 const key = () => (process.env.OPENAI_API_KEY ?? "").trim();
 
 export const hasOpenAi = () => key().length > 0;
