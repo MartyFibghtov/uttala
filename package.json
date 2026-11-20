@@ -12,7 +12,7 @@
     "e2e:ui": "playwright test --ui",
     "e2e:live": "playwright test -c playwright.live.config.ts",
     "stripe:setup": "node scripts/stripe-setup.mjs",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "next typegen && tsc --noEmit",
     "calibrate": "npx -y tsx --tsconfig tsconfig.json scripts/calibrate.mts",
     "realset": "npx -y tsx --tsconfig tsconfig.json scripts/realset.mts",
     "phonecheck": "npx -y tsx --tsconfig tsconfig.json scripts/phonecheck.mts",
