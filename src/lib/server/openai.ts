@@ -623,19 +623,18 @@ export async function assessWithOpenAi(
     '- "score": integer 0..100 (95-100 = indistinguishable native speech including regional native dialects; 82-94 = near-native with faint accent coloration; 64-81 = understandable with a clear foreign accent or vowel/consonant drift; 38-63 = marked mispronunciation, phoneme substitution, wrong vowel length, or misplaced stress; 0-37 = severe mispronunciation, wrong word, or omitted)',
     '- "errorType": "None" | "Mispronunciation" | "Omission" | "Unclear" | "Stress" | "VowelQuality" | "ConsonantSubstitution" | "FinalConsonant" | "Tone"',
     "",
-    "IMPORTANT FOR SPEED: For any word with score >= 88 and errorType \"None\", ONLY output {\"index\", \"text\", \"score\", \"errorType\"} and OMIT all other fields.",
+    "OUTPUT BUDGET (speed matters, every extra token costs latency): for any word with score >= 88 and errorType \"None\", output ONLY {\"index\",\"text\",\"score\",\"errorType\"}.",
     "ONLY for words with score < 88 (or errorType !== \"None\"), also include:",
-    '- "expectedIpa": target IPA transcription without slashes (e.g. "θɪŋk")',
-    '- "heardIpa": actual IPA produced by the speaker without slashes (e.g. "sɪŋk")',
+    '- "expectedIpa": target IPA without slashes (e.g. "θɪŋk")',
+    '- "heardIpa": IPA actually produced without slashes (e.g. "sɪŋk")',
     '- "heard": if it sounded like a different word, that word',
-    '- "errorCategory": short label (e.g. "Voiceless th (/θ/ → /s/)")',
-    '- "diagnosis": concise 1-sentence explanation of what changed acoustically/articulatorily',
-    '- "fix": concise 1-sentence physical articulatory instruction (tongue, lips, jaw, voicing)',
-    '- "stressIssue": optional note if syllable stress or tone was misplaced',
-    '- "phonemes": array of { "ipa": string, "heardIpa"?: string, "score": integer 0..100, "issue"?: string, "tip"?: string }',
+    '- "errorCategory": 2-5 word label (e.g. "Voiceless th (/θ/ → /s/)")',
+    '- "diagnosis": ONE short sentence (max 12 words) on what changed',
+    '- "fix": ONE short sentence (max 12 words) physical articulatory instruction',
+    '- "phonemes": array of { "ipa": string, "heardIpa"?: string (only if different), "score": integer 0..100 } (no other phoneme fields)',
     "",
-    'Also provide top-level "overallFeedback": 1-2 sentences of specific phonetic coaching.',
-    'Respond with compact valid JSON ONLY, no markdown fences: { "overallFeedback": string, "words": [...] }',
+    'Also provide top-level "overallFeedback": ONE short sentence of specific coaching.',
+    'Respond with compact valid JSON ONLY on a single line, no markdown fences: { "overallFeedback": string, "words": [...] }',
   ]
     .filter(Boolean)
     .join("\n");
@@ -649,6 +648,8 @@ export async function assessWithOpenAi(
     body: JSON.stringify({
       model: openAiAudioModel(),
       temperature: 0.2,
+      modalities: ["text"],
+      max_completion_tokens: 1400,
       messages: [
         {
           role: "user",
