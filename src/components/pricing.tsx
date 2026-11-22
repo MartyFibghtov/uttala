@@ -139,11 +139,11 @@ export function Pricing({ currentPlan: planProp, trialAvailable: trialProp = tru
               key={id}
               className={cn(
                 "relative flex flex-col rounded-2xl border bg-card p-6",
-                popular && "border-transparent shadow-lg ring-2 ring-foreground",
+                popular && "card-featured",
               )}
             >
               {popular && (
-                <span className="absolute -top-3 left-6 rounded-full bg-foreground px-3 py-1 text-xs font-medium text-background">
+                <span className="premium-glow absolute -top-3 left-6 rounded-full bg-foreground px-3 py-1 text-xs font-medium text-background">
                   Most popular
                 </span>
               )}
@@ -177,7 +177,7 @@ export function Pricing({ currentPlan: planProp, trialAvailable: trialProp = tru
                   </Button>
                 ) : signedIn ? (
                   <Button
-                    className="w-full rounded-full"
+                    className="premium-glow w-full rounded-full"
                     variant={popular ? "default" : "outline"}
                     disabled={pending !== null || (caps !== null && !caps.billing)}
                     onClick={() => choose(id)}
@@ -190,7 +190,7 @@ export function Pricing({ currentPlan: planProp, trialAvailable: trialProp = tru
                         : `Get ${plan.name}`}
                   </Button>
                 ) : (
-                  <Button asChild className="w-full rounded-full" variant={popular ? "default" : "outline"}>
+                  <Button asChild className="premium-glow w-full rounded-full" variant={popular ? "default" : "outline"}>
                     <Link href="/sign-up">Try {plan.name} free for {TRIAL_DAYS} days</Link>
                   </Button>
                 )}
@@ -278,7 +278,7 @@ export function UpgradeCard({
       <div className="mt-1 space-y-2 text-sm leading-relaxed text-muted-foreground">{children}</div>
       <p className="mt-3 text-xs text-muted-foreground">{plusTerms(trialAvailable)}</p>
       <div className="mt-3 flex flex-wrap gap-2">
-        <Button size="sm" className="rounded-full" onClick={() => setOpen(true)}>
+        <Button size="sm" className="premium-glow rounded-full" onClick={() => setOpen(true)}>
           {ctaLabel ?? (trialAvailable ? `Try Plus free for ${TRIAL_DAYS} days` : "See Plus")}
         </Button>
         {onDismiss && (

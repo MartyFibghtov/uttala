@@ -287,7 +287,7 @@ export function HomeView() {
                   <p className="text-sm text-muted-foreground">Day streak</p>
                   <p className="flex items-center gap-2 text-4xl font-semibold tracking-tight tabular-nums">
                     {o.streak}
-                    <Flame className={cn("size-7", o.streak > 0 ? "text-orange-500" : "text-muted-foreground/40")} />
+                    <Flame className={cn("size-7", o.streak > 0 ? "text-brand" : "text-muted-foreground/40")} />
                   </p>
                 </div>
                 <div className="text-right text-xs text-muted-foreground">

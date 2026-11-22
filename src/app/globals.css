@@ -39,6 +39,61 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
+  --color-brand: var(--brand);
+  --color-brand-soft: var(--brand-soft);
+
+  /* Status colours, retuned from Tailwind's stock ramps. Same lightness ladder
+     (so contrast against text and surfaces is unchanged) with calmer chroma and
+     warmer hues: jade instead of neon emerald, honey instead of lemon amber,
+     a muted rose-red and an apricot ember. */
+  --color-emerald-50: oklch(0.976 0.014 165);
+  --color-emerald-100: oklch(0.948 0.034 164);
+  --color-emerald-200: oklch(0.9 0.06 164);
+  --color-emerald-300: oklch(0.835 0.086 163);
+  --color-emerald-400: oklch(0.75 0.104 162);
+  --color-emerald-500: oklch(0.67 0.106 161);
+  --color-emerald-600: oklch(0.565 0.094 162);
+  --color-emerald-700: oklch(0.49 0.08 164);
+  --color-emerald-800: oklch(0.42 0.064 166);
+  --color-emerald-900: oklch(0.37 0.052 168);
+  --color-emerald-950: oklch(0.255 0.036 172);
+
+  --color-amber-50: oklch(0.982 0.016 86);
+  --color-amber-100: oklch(0.958 0.038 84);
+  --color-amber-200: oklch(0.918 0.072 82);
+  --color-amber-300: oklch(0.87 0.104 78);
+  --color-amber-400: oklch(0.815 0.122 72);
+  --color-amber-500: oklch(0.76 0.128 64);
+  --color-amber-600: oklch(0.655 0.124 56);
+  --color-amber-700: oklch(0.545 0.112 49);
+  --color-amber-800: oklch(0.465 0.096 46);
+  --color-amber-900: oklch(0.408 0.078 46);
+  --color-amber-950: oklch(0.278 0.054 46);
+
+  --color-red-50: oklch(0.97 0.012 18);
+  --color-red-100: oklch(0.935 0.028 18);
+  --color-red-200: oklch(0.882 0.05 19);
+  --color-red-300: oklch(0.805 0.086 20);
+  --color-red-400: oklch(0.705 0.132 22);
+  --color-red-500: oklch(0.638 0.156 24);
+  --color-red-600: oklch(0.572 0.162 25);
+  --color-red-700: oklch(0.502 0.142 25);
+  --color-red-800: oklch(0.444 0.118 25);
+  --color-red-900: oklch(0.396 0.096 24);
+  --color-red-950: oklch(0.262 0.064 24);
+
+  --color-orange-50: oklch(0.978 0.014 70);
+  --color-orange-100: oklch(0.952 0.032 66);
+  --color-orange-200: oklch(0.9 0.06 60);
+  --color-orange-300: oklch(0.835 0.094 54);
+  --color-orange-400: oklch(0.752 0.128 48);
+  --color-orange-500: oklch(0.695 0.142 43);
+  --color-orange-600: oklch(0.632 0.144 39);
+  --color-orange-700: oklch(0.548 0.128 37);
+  --color-orange-800: oklch(0.468 0.106 36);
+  --color-orange-900: oklch(0.408 0.086 37);
+  --color-orange-950: oklch(0.266 0.054 36);
+
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -81,9 +136,14 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+  /* The one brand accent: a warm apricot lifted from the hero artwork. Used sparingly. */
+  --brand: oklch(0.7 0.13 47);
+  --brand-soft: oklch(0.93 0.035 60);
 }
 
 .dark {
+  --brand: oklch(0.78 0.11 52);
+  --brand-soft: oklch(0.32 0.05 45);
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
@@ -130,83 +190,225 @@
   html {
     @apply font-sans;
   }
+  ::selection {
+    background: color-mix(in oklab, var(--brand) 26%, transparent);
+  }
 }
 
 @layer components {
 /* ---------------------------------------------------------------------------
-   Orbs: soft, slowly moving colour spheres used as the product's accent.
+   Orbs: pearlescent voice spheres, the product's only real use of colour.
+   Each palette is a pastel body (o1 → o2), a deeper shade for the core (o3),
+   a near-white highlight (o4) and a second hue (o5) that drifts through it so
+   the surface reads as iridescent rather than a flat ball. Lighting is fixed
+   (top-left key, soft rim at the bottom) while the colour inside slowly turns.
+   Blur and shading scale with --orb-size so 14px and 168px orbs both hold up.
    --------------------------------------------------------------------------- */
 .orb {
-  --o1: #f6c177;
-  --o2: #e8703a;
-  --o3: #7a2e12;
-  --o4: #fff1c9;
+  --orb-size: 48px;
+  --o1: #f3d9a4;
+  --o2: #e2b26a;
+  --o3: #a87a3e;
+  --o4: #fff8ea;
+  --o5: #f2c4b4;
   position: relative;
   isolation: isolate;
   overflow: hidden;
   border-radius: 9999px;
-  background: var(--o2);
+  background: radial-gradient(130% 130% at 30% 22%, var(--o4) 0%, var(--o1) 26%, var(--o2) 64%, var(--o3) 100%);
   box-shadow:
-    inset 0 0 0 1px rgb(255 255 255 / 0.35),
-    0 18px 40px -18px color-mix(in oklab, var(--o2) 70%, transparent);
+    0 calc(var(--orb-size) * 0.14) calc(var(--orb-size) * 0.32) calc(var(--orb-size) * -0.18)
+      color-mix(in oklab, var(--o3) 48%, transparent),
+    0 1px 2px color-mix(in oklab, var(--o3) 22%, transparent);
 }
 .orb::before,
 .orb::after {
   content: "";
   position: absolute;
-  inset: -30%;
   border-radius: inherit;
+  pointer-events: none;
 }
+/* Slowly turning colour field inside the sphere. */
 .orb::before {
-  background: conic-gradient(from 0deg, var(--o1), var(--o2), var(--o3), var(--o4), var(--o2), var(--o1));
-  filter: blur(14px);
-  animation: orb-spin 16s linear infinite;
-}
-.orb::after {
+  inset: -22%;
   background:
-    radial-gradient(circle at 28% 26%, var(--o4) 0, transparent 42%),
-    radial-gradient(circle at 74% 72%, var(--o3) 0, transparent 46%);
-  mix-blend-mode: soft-light;
-  filter: blur(10px);
-  animation: orb-drift 11s ease-in-out infinite alternate;
+    radial-gradient(48% 42% at 30% 72%, var(--o5) 0%, transparent 72%),
+    radial-gradient(44% 50% at 74% 30%, var(--o1) 0%, transparent 70%),
+    radial-gradient(40% 40% at 66% 78%, color-mix(in oklab, var(--o3) 60%, transparent) 0%, transparent 74%),
+    conic-gradient(from 200deg at 52% 50%, var(--o2), var(--o5), var(--o1), var(--o4), var(--o2));
+  filter: blur(calc(var(--orb-size) * 0.11));
+  opacity: 0.9;
+  animation: orb-spin 22s linear infinite;
 }
-.orb-gold { --o1: #f8d57e; --o2: #e9a93a; --o3: #a8690f; --o4: #fff6d6; }
-.orb-ember { --o1: #ff8a5b; --o2: #d8431f; --o3: #2a0d0a; --o4: #ffd0b0; }
-.orb-orchid { --o1: #e7b7d6; --o2: #a8558f; --o3: #4a2147; --o4: #fbe9f3; }
-.orb-sky { --o1: #b9d7f5; --o2: #5b93d6; --o3: #25467e; --o4: #f4f9ff; }
-.orb-moss { --o1: #bfe3b4; --o2: #4f9a6a; --o3: #1e4a3a; --o4: #f3fbe9; }
-.orb-float { animation: orb-float 8s ease-in-out infinite; }
-.orb-float-slow { animation: orb-float 12s ease-in-out -4s infinite; }
+/* Fixed lighting: frosted key light, faint bounce light and a glass rim. */
+.orb::after {
+  inset: 0;
+  background:
+    radial-gradient(38% 30% at 34% 22%, rgb(255 255 255 / 0.82) 0%, rgb(255 255 255 / 0.28) 46%, transparent 72%),
+    radial-gradient(60% 34% at 50% 104%, color-mix(in oklab, var(--o4) 70%, transparent) 0%, transparent 70%),
+    radial-gradient(120% 120% at 30% 22%, transparent 56%, color-mix(in oklab, var(--o3) 38%, transparent) 100%);
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 0.28),
+    inset 0 calc(var(--orb-size) * -0.06) calc(var(--orb-size) * 0.16) color-mix(in oklab, var(--o3) 32%, transparent);
+}
+/* Champagne: warm honey with a rose sheen. */
+.orb-gold { --o1: #f3d9a4; --o2: #e2b26a; --o3: #a87a3e; --o4: #fff8ea; --o5: #f2c4b4; }
+/* Apricot: soft coral with a blush of pink. */
+.orb-ember { --o1: #f8cbb2; --o2: #e9906c; --o3: #a8503a; --o4: #fff2ea; --o5: #f1bfd0; }
+/* Lilac: lavender with a blush sheen. */
+.orb-orchid { --o1: #e6d2f0; --o2: #b892d6; --o3: #70528f; --o4: #fcf7ff; --o5: #f0c8de; }
+/* Mist: powder blue with an aqua sheen. */
+.orb-sky { --o1: #cfe2f5; --o2: #8cb4e0; --o3: #46699c; --o4: #f5faff; --o5: #c4e7ec; }
+/* Sage: pale mint with a mist sheen. */
+.orb-moss { --o1: #d0e9d9; --o2: #8fc2a5; --o3: #4c8068; --o4: #f4fbf7; --o5: #cfe2f2; }
+.orb-float { animation: orb-float 9s ease-in-out infinite; }
+.orb-float-slow { animation: orb-float 13s ease-in-out -4s infinite; }
 
 @keyframes orb-spin {
   to { transform: rotate(360deg); }
 }
-@keyframes orb-drift {
-  from { transform: translate(-6%, -4%) rotate(0deg) scale(1); }
-  to { transform: translate(6%, 5%) rotate(40deg) scale(1.12); }
-}
 @keyframes orb-float {
   0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-10px); }
+  50% { transform: translateY(-6px); }
 }
 
-/* Thin band of colour across the top of the app, as a quiet signature. */
+/* Hairline signature across the top: a single pearl sheen that fades out at
+   both ends, instead of a full-width colour band. */
 .aurora-line {
-  height: 3px;
-  background: linear-gradient(90deg, #e9a93a, #d8431f, #a8558f, #5b93d6, #4f9a6a, #e9a93a);
-  background-size: 200% 100%;
-  animation: aurora-slide 18s linear infinite;
-}
-@keyframes aurora-slide {
-  to { background-position: 200% 0; }
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in oklab, var(--brand) 55%, transparent) 30%,
+    rgb(180 150 216 / 0.5) 52%,
+    rgb(150 182 224 / 0.45) 70%,
+    transparent 100%
+  );
 }
 
-/* Soft colour wash behind hero sections. */
+/* Soft colour wash behind hero sections, in the orb palette. */
 .aurora-wash {
   background:
-    radial-gradient(40rem 24rem at 85% -10%, rgb(233 169 58 / 0.16), transparent 70%),
-    radial-gradient(34rem 22rem at 105% 40%, rgb(168 85 143 / 0.13), transparent 70%),
-    radial-gradient(30rem 20rem at 60% 110%, rgb(91 147 214 / 0.12), transparent 70%);
+    radial-gradient(40rem 24rem at 85% -10%, rgb(226 178 106 / 0.13), transparent 70%),
+    radial-gradient(34rem 22rem at 105% 40%, rgb(180 150 216 / 0.12), transparent 70%),
+    radial-gradient(30rem 20rem at 60% 110%, rgb(150 182 224 / 0.11), transparent 70%);
+}
+.dark .aurora-wash {
+  background:
+    radial-gradient(40rem 24rem at 85% -10%, rgb(226 178 106 / 0.08), transparent 70%),
+    radial-gradient(34rem 22rem at 105% 40%, rgb(180 150 216 / 0.08), transparent 70%),
+    radial-gradient(30rem 20rem at 60% 110%, rgb(150 182 224 / 0.07), transparent 70%);
+}
+
+/* Highlighted card (the recommended plan): hairline ring, layered depth and a
+   faint pearl sheen along the top edge, instead of a heavy outline. */
+.card-featured {
+  isolation: isolate;
+  border-color: transparent;
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--foreground) 88%, transparent),
+    0 1px 2px rgb(0 0 0 / 0.05),
+    0 28px 56px -32px rgb(0 0 0 / 0.38);
+}
+.card-featured::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 9rem;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    radial-gradient(70% 100% at 18% 0%, rgb(226 178 106 / 0.16), transparent 72%),
+    radial-gradient(60% 100% at 88% 0%, rgb(180 150 216 / 0.15), transparent 72%);
+}
+.dark .card-featured {
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / 0.5),
+    0 28px 56px -32px rgb(0 0 0 / 0.8);
+}
+.dark .card-featured::before {
+  background:
+    radial-gradient(70% 100% at 18% 0%, rgb(226 178 106 / 0.1), transparent 72%),
+    radial-gradient(60% 100% at 88% 0%, rgb(180 150 216 / 0.1), transparent 72%);
+}
+
+/* ---------------------------------------------------------------------------
+   Premium: anything that sells or marks a paid plan. A 1px iridescent ring in
+   the orb palette turns slowly around the element, with a soft multicolour
+   halo underneath. The element keeps its own fill, so the theme stays neutral.
+   --------------------------------------------------------------------------- */
+@property --premium-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+.premium-glow {
+  position: relative;
+  box-shadow:
+    -10px 3px 22px -10px rgb(233 144 108 / 0.55),
+    10px 3px 22px -10px rgb(140 180 224 / 0.6),
+    0 10px 24px -12px rgb(184 146 214 / 0.65),
+    0 -4px 16px -10px rgb(226 178 106 / 0.45);
+}
+.premium-glow:hover {
+  box-shadow:
+    -14px 3px 32px -7px rgb(233 144 108 / 0.52),
+    14px 3px 32px -7px rgb(140 180 224 / 0.58),
+    0 14px 34px -9px rgb(184 146 214 / 0.65),
+    0 -6px 24px -8px rgb(226 178 106 / 0.45);
+}
+.dark .premium-glow {
+  box-shadow:
+    -12px 3px 28px -8px rgb(233 144 108 / 0.42),
+    12px 3px 28px -8px rgb(140 180 224 / 0.48),
+    0 12px 30px -10px rgb(184 146 214 / 0.55),
+    0 -5px 22px -9px rgb(226 178 106 / 0.36);
+}
+.dark .premium-glow:hover {
+  box-shadow:
+    -12px 3px 26px -9px rgb(233 144 108 / 0.65),
+    12px 3px 26px -9px rgb(140 180 224 / 0.7),
+    0 12px 28px -11px rgb(184 146 214 / 0.75),
+    0 -5px 18px -9px rgb(226 178 106 / 0.55);
+}
+.premium-glow::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  padding: 1px;
+  border-radius: inherit;
+  pointer-events: none;
+  background: conic-gradient(
+    from var(--premium-angle),
+    #e2b26a,
+    #e9906c,
+    #f1bfd0,
+    #b892d6,
+    #8cb4e0,
+    #8fc2a5,
+    #e2b26a
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: premium-turn 7s linear infinite;
+}
+@keyframes premium-turn {
+  to { --premium-angle: 360deg; }
+}
+
+/* Paid plan names: the same palette as text, kept legible in both themes. */
+.premium-text {
+  background: linear-gradient(90deg, #b5773a, #c4664a, #8e62b8, #4f78b0);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.dark .premium-text {
+  background-image: linear-gradient(90deg, #f0c98a, #f3a98a, #d2b4ec, #a9c8ef);
 }
 
 /* Fades hero artwork smoothly into the left typography zone. */
@@ -245,7 +447,7 @@ details.disclosure:not([open])::details-content {
   .orb::after,
   .orb-float,
   .orb-float-slow,
-  .aurora-line {
+  .premium-glow::before {
     animation: none;
   }
 }

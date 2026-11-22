@@ -330,7 +330,7 @@ function Sounds({ lang }: { lang: string }) {
       <Empty title="Find the exact sounds that hold you back">
         Pro adds server sound-by-sound scores for English and keeps a running list of your weakest sounds. In other languages the free precise sound check already compares each sound with a native reading.
         <span className="mt-4 flex flex-wrap justify-center gap-2">
-          <Button className="rounded-full" onClick={() => promptUpgrade("phonemes")}>
+          <Button className="premium-glow rounded-full" onClick={() => promptUpgrade("phonemes")}>
             See Pro
           </Button>
           <Button asChild variant="outline" className="rounded-full">

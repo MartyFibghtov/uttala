@@ -1692,10 +1692,10 @@ export function ScoringAndPlanScreen({
   const selectedPlanItem = lessonWords[selectedPlanIdx] ?? lessonWords[0];
 
   const bandStyles = [
-    { bar: "bg-emerald-500", wash: "from-emerald-500/20 via-emerald-500/5 to-transparent", text: "text-emerald-700 dark:text-emerald-400" },
-    { bar: "bg-amber-400", wash: "from-amber-400/20 via-amber-400/5 to-transparent", text: "text-amber-700 dark:text-amber-300" },
-    { bar: "bg-orange-500", wash: "from-orange-500/20 via-orange-500/5 to-transparent", text: "text-orange-700 dark:text-orange-400" },
-    { bar: "bg-red-500", wash: "from-red-500/20 via-red-500/5 to-transparent", text: "text-red-700 dark:text-red-400" },
+    { dot: "bg-emerald-500", text: "text-emerald-700 dark:text-emerald-400" },
+    { dot: "bg-amber-400", text: "text-amber-700 dark:text-amber-300" },
+    { dot: "bg-orange-500", text: "text-orange-700 dark:text-orange-400" },
+    { dot: "bg-red-500", text: "text-red-700 dark:text-red-400" },
   ];
   const bands = SCORE_BANDS.map((b, i) => ({ ...b, range: `${b.range}%`, ...bandStyles[i] }));
 
@@ -1718,15 +1718,16 @@ export function ScoringAndPlanScreen({
           <CardContent className="space-y-2.5">
             {bands.map((b) => (
               <details key={b.label} className="disclosure group rounded-xl border bg-background overflow-hidden">
-                <summary className="relative flex items-center justify-between gap-4 px-4 py-3.5 select-none">
-                  <span className={cn("absolute inset-y-0 left-0 w-1.5", b.bar)} aria-hidden />
-                  <span
-                    className={cn("pointer-events-none absolute inset-0 bg-gradient-to-r", b.wash)}
-                    aria-hidden
-                  />
-                  <span className="relative pl-2 text-base font-semibold tabular-nums">{b.range}</span>
-                  <span className="relative flex items-center gap-2">
-                    <span className={cn("text-sm font-semibold", b.text)}>{b.label}</span>
+                <summary className="flex items-center justify-between gap-4 px-4 py-3.5 transition-colors select-none hover:bg-secondary/50">
+                  <span className="flex items-center gap-3">
+                    <span
+                      className={cn("size-2 rounded-full ring-4 ring-current/10", b.dot, b.text)}
+                      aria-hidden
+                    />
+                    <span className="text-base font-semibold tabular-nums">{b.range}</span>
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <span className={cn("text-sm font-medium", b.text)}>{b.label}</span>
                     <ChevronDown className="size-4 text-muted-foreground transition-transform duration-200 group-open:rotate-180" />
                   </span>
                 </summary>

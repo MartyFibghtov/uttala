@@ -26,7 +26,7 @@ export function Orb({
         float === "slow" && "orb-float-slow",
         className,
       )}
-      style={{ width: size, height: size, ...style }}
+      style={{ width: size, height: size, "--orb-size": `${size}px`, ...style } as React.CSSProperties}
     />
   );
 }

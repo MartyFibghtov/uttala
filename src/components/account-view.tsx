@@ -299,7 +299,13 @@ export function AccountView() {
       <div className="space-y-6">
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">{me.billing ? `${PLANS[me.plan].name} plan` : "Your plan"}</CardTitle>
+            <CardTitle className="text-base">
+              {me.billing ? (
+                <span className={cn(me.plan !== "free" && "premium-text")}>{PLANS[me.plan].name} plan</span>
+              ) : (
+                "Your plan"
+              )}
+            </CardTitle>
             {me.billing ? <PlanStatus /> : <p className="text-sm text-muted-foreground">Everything is included.</p>}
           </CardHeader>
           <CardContent className="space-y-6">

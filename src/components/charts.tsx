@@ -57,7 +57,7 @@ export function WeekStrip({ days, goal }: { days: Days; goal: number }) {
               title={`${key}: ${xp} points`}
               className={cn(
                 "flex size-8 items-center justify-center rounded-full border text-xs",
-                xp > 0 && "border-transparent bg-amber-100 text-amber-900",
+                xp > 0 && "border-transparent bg-brand-soft text-brand",
                 xp >= goal && "bg-foreground text-background",
                 key === today && "ring-2 ring-foreground/20 ring-offset-2 ring-offset-background",
               )}
