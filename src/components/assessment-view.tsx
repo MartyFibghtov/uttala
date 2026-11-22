@@ -23,6 +23,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAccount } from "@/hooks/use-account";
 import { resetTimeLabel } from "@/lib/plans";
 import { diagnosticPromptsFor, getLanguage } from "@/lib/languages";
+import { pillarScores } from "@/lib/prosody";
 import { addCheckpoint, useStore } from "@/lib/store";
 import type { Checkpoint } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -282,7 +283,9 @@ export function AssessmentView() {
   const finishScan = (finalTakes: (DiagnosticTake | undefined)[]) => {
     const filled = prompts.map((p, i) => finalTakes[i] ?? buildSimulatedTake(p, lang, i));
     const score = Math.round(filled.reduce((s, t) => s + t.attempt.overall, 0) / filled.length);
-    const accuracy = Math.round(filled.reduce((s, t) => s + t.result.scores.accuracy, 0) / filled.length);
+    const accuracy = Math.round(
+      filled.reduce((s, t) => s + pillarScores(t.result, t.prosody, lang).sounds, 0) / filled.length,
+    );
     const intelligibility = Math.round(
       filled.reduce((s, t) => s + t.result.scores.intelligibility, 0) / filled.length,
     );

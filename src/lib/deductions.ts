@@ -72,6 +72,22 @@ export const NATIVE_LEVEL: Record<string, NativeLevel> = {
 };
 const DEFAULT_LEVEL: NativeLevel = { soundWeak: -2.3, soundWrong: -5.7, rhythm: 45, intonation: 50 };
 
+/** Return the calibrated native baseline thresholds for a language. */
+export function nativeLevelFor(lang: string): NativeLevel {
+  return NATIVE_LEVEL[lang] ?? DEFAULT_LEVEL;
+}
+
+/**
+ * Re-anchor a raw prosody measure (0–100) onto the same native-calibrated 0–100 scale
+ * used by overall scores and deductions, where `nativeFloor` maps to 90.
+ */
+export function nativeProsodyScore(raw: number, nativeFloor: number): number {
+  if (raw >= nativeFloor) {
+    return Math.min(100, Math.round(90 + ((raw - nativeFloor) / Math.max(1, 100 - nativeFloor)) * 10));
+  }
+  return Math.max(0, Math.round((raw / Math.max(1, nativeFloor)) * 90));
+}
+
 /**
  * Mistakes cost a share of the sentence, so a long sentence is not punished for having more sounds: the
  * costs below are for a typical sentence of REF_SOUNDS sounds and REF_WORDS words, and scale with

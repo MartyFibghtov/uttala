@@ -64,7 +64,7 @@ import {
 } from "@/lib/languages";
 import { LEVELS, statusFor, type LevelId } from "@/lib/levels";
 import { enrichWordDiagnostics, extractFocusSounds, segmentWordToPhonemes } from "@/lib/phonetics";
-import { compareProsody, fallbackProsody, overallScore } from "@/lib/prosody";
+import { compareProsody, fallbackProsody, overallScore, pillarScores } from "@/lib/prosody";
 import { rateWithDeductions } from "@/lib/rating";
 import { SCORE_BANDS } from "@/lib/score-bands";
 import { soundForIpa, soundsFor } from "@/lib/sounds";
@@ -340,8 +340,9 @@ export function extractHighlightsFromTakes(
   }
 
   // 2. Prosody (Melody & Rhythm) highlights across takes
-  const rhythms = takes.map((t) => t.prosody.rhythm).filter((v): v is number => v !== null);
-  const intonations = takes.map((t) => t.prosody.intonation).filter((v): v is number => v !== null);
+  const pillars = takes.map((t) => pillarScores(t.result, t.prosody, lang));
+  const rhythms = pillars.map((p) => p.rhythm).filter((v): v is number => v !== null);
+  const intonations = pillars.map((p) => p.melody).filter((v): v is number => v !== null);
   const fluencies = takes.map((t) => t.prosody.fluency).filter((v): v is number => v !== null);
   const totalHesitations = takes.reduce((s, t) => s + t.prosody.hesitations, 0);
 
@@ -971,6 +972,10 @@ export function DiagnosticStageRecorder({
   };
 
   const Icon = STAGE_ICON[prompt.kind];
+  const stagePillars = useMemo(
+    () => (savedTake ? pillarScores(savedTake.result, savedTake.prosody, lang) : null),
+    [savedTake, lang],
+  );
   const highlights = useMemo(
     () => (savedTake ? extractTakeHighlights(savedTake.result, savedTake.prosody, lang, prompt.kind) : null),
     [savedTake, lang, prompt.kind],
@@ -1162,7 +1167,7 @@ export function DiagnosticStageRecorder({
         </CardContent>
       </Card>
 
-      {savedTake && highlights && (
+      {savedTake && highlights && stagePillars && (
         <Card>
           <CardHeader className="flex flex-row items-center justify-between gap-4 pb-2">
             <div>
@@ -1230,20 +1235,30 @@ export function DiagnosticStageRecorder({
                 <div className="grid grid-cols-3 gap-2 text-center text-xs">
                   <div className="rounded-lg border bg-background p-2.5">
                     <span className="text-muted-foreground">Sounds</span>
-                    <p className={cn("mt-0.5 text-lg font-semibold tabular-nums", scoreColor(savedTake.result.scores.accuracy))}>
-                      {savedTake.result.scores.accuracy}%
+                    <p className={cn("mt-0.5 text-lg font-semibold tabular-nums", scoreColor(stagePillars.sounds))}>
+                      {stagePillars.sounds}%
                     </p>
                   </div>
                   <div className="rounded-lg border bg-background p-2.5">
                     <span className="text-muted-foreground">Rhythm</span>
-                    <p className={cn("mt-0.5 text-lg font-semibold tabular-nums", scoreColor(savedTake.prosody.rhythm ?? 80))}>
-                      {savedTake.prosody.rhythm ?? 80}%
+                    <p
+                      className={cn(
+                        "mt-0.5 text-lg font-semibold tabular-nums",
+                        scoreColor(stagePillars.rhythm ?? stagePillars.sounds),
+                      )}
+                    >
+                      {stagePillars.rhythm ?? stagePillars.sounds}%
                     </p>
                   </div>
                   <div className="rounded-lg border bg-background p-2.5">
                     <span className="text-muted-foreground">Melody</span>
-                    <p className={cn("mt-0.5 text-lg font-semibold tabular-nums", scoreColor(savedTake.prosody.intonation ?? 80))}>
-                      {savedTake.prosody.intonation ?? 80}%
+                    <p
+                      className={cn(
+                        "mt-0.5 text-lg font-semibold tabular-nums",
+                        scoreColor(stagePillars.melody ?? stagePillars.sounds),
+                      )}
+                    >
+                      {stagePillars.melody ?? stagePillars.sounds}%
                     </p>
                   </div>
                 </div>
@@ -1352,14 +1367,17 @@ export function SpeechLevelRankingScreen({
   const language = getLanguage(lang);
   const firstName = userName ? userName.trim().split(" ")[0] : undefined;
 
+  const perTake = takes.map((t) => pillarScores(t.result, t.prosody, lang));
   const avgScore = Math.round(takes.reduce((s, t) => s + t.attempt.overall, 0) / Math.max(1, takes.length));
-  const avgSounds = Math.round(takes.reduce((s, t) => s + t.result.scores.accuracy, 0) / Math.max(1, takes.length));
-  const avgRhythm = Math.round(
-    takes.reduce((s, t) => s + (t.prosody.rhythm ?? t.result.scores.accuracy), 0) / Math.max(1, takes.length),
-  );
-  const avgMelody = Math.round(
-    takes.reduce((s, t) => s + (t.prosody.intonation ?? t.result.scores.accuracy), 0) / Math.max(1, takes.length),
-  );
+  const avgSounds = Math.round(perTake.reduce((s, p) => s + p.sounds, 0) / Math.max(1, perTake.length));
+  const rhythmVals = perTake.map((p) => p.rhythm).filter((v): v is number => v !== null);
+  const avgRhythm = rhythmVals.length
+    ? Math.round(rhythmVals.reduce((s, v) => s + v, 0) / rhythmVals.length)
+    : avgSounds;
+  const melodyVals = perTake.map((p) => p.melody).filter((v): v is number => v !== null);
+  const avgMelody = melodyVals.length
+    ? Math.round(melodyVals.reduce((s, v) => s + v, 0) / melodyVals.length)
+    : avgSounds;
 
   const rank = rankForScore(avgScore);
   const switchTo = rank.recommended !== me.profile.level ? rank.recommended : null;
@@ -1408,20 +1426,25 @@ export function SpeechLevelRankingScreen({
               <p className="mt-3 max-w-md text-sm leading-relaxed text-muted-foreground">{rank.description}</p>
             </div>
 
-            <div className="grid grid-cols-3 gap-2.5">
-              {[
-                { label: "Sounds", value: avgSounds, icon: Ear },
-                { label: "Rhythm", value: avgRhythm, icon: Timer },
-                { label: "Melody", value: avgMelody, icon: Music },
-              ].map(({ label, value, icon: PillarIcon }) => (
-                <div key={label} className="rounded-xl border bg-background/85 p-3">
-                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <PillarIcon className="size-3.5" />
-                    {label}
+            <div className="space-y-2">
+              <p className="text-[11px] font-medium text-muted-foreground">
+                Average across all {takes.length} readings
+              </p>
+              <div className="grid grid-cols-3 gap-2.5">
+                {[
+                  { label: "Sounds", value: avgSounds, icon: Ear },
+                  { label: "Rhythm", value: avgRhythm, icon: Timer },
+                  { label: "Melody", value: avgMelody, icon: Music },
+                ].map(({ label, value, icon: PillarIcon }) => (
+                  <div key={label} className="rounded-xl border bg-background/85 p-3">
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <PillarIcon className="size-3.5" />
+                      {label}
+                    </div>
+                    <p className={cn("mt-1 text-2xl font-semibold tabular-nums", scoreColor(value))}>{value}%</p>
                   </div>
-                  <p className={cn("mt-1 text-2xl font-semibold tabular-nums", scoreColor(value))}>{value}%</p>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
 
             <details className="disclosure group rounded-xl border bg-background/85">
@@ -1431,21 +1454,31 @@ export function SpeechLevelRankingScreen({
               </summary>
               <div className="space-y-3 border-t px-4 py-3 text-xs">
                 <div className="divide-y">
-                  {takes.map((t, i) => (
-                    <div key={i} className="flex items-center justify-between gap-3 py-2 first:pt-0 last:pb-0">
-                      <div className="min-w-0">
-                        <p className="font-medium text-foreground">
-                          {i + 1}. {t.prompt.title}
-                        </p>
-                        <p className="truncate text-muted-foreground" lang={lang}>
-                          {t.prompt.text}
-                        </p>
+                  {takes.map((t, i) => {
+                    const p = perTake[i];
+                    return (
+                      <div key={i} className="flex items-center justify-between gap-3 py-2 first:pt-0 last:pb-0">
+                        <div className="min-w-0">
+                          <p className="font-medium text-foreground">
+                            Reading {i + 1} · {t.prompt.title}
+                          </p>
+                          <p className="truncate text-muted-foreground" lang={lang}>
+                            {t.prompt.text}
+                          </p>
+                          <p className="mt-0.5 text-[11px] text-muted-foreground tabular-nums">
+                            Sounds {p.sounds}% · Rhythm {p.rhythm !== null ? `${p.rhythm}%` : "–"} · Melody{" "}
+                            {p.melody !== null ? `${p.melody}%` : "–"}
+                          </p>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <span className={cn("block text-sm font-semibold tabular-nums", scoreColor(t.attempt.overall))}>
+                            {t.attempt.overall}%
+                          </span>
+                          <span className="block text-[10px] text-muted-foreground">overall</span>
+                        </div>
                       </div>
-                      <span className={cn("shrink-0 text-sm font-semibold tabular-nums", scoreColor(t.attempt.overall))}>
-                        {t.attempt.overall}%
-                      </span>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
 
                 <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-card p-3">

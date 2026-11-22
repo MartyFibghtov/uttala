@@ -24,6 +24,7 @@ import { play } from "@/lib/audio";
 import { diagnosticPromptsFor, getLanguage, LANGUAGES } from "@/lib/languages";
 import { LEVEL_IDS, LEVELS } from "@/lib/levels";
 import { MINIMAL_PAIRS } from "@/lib/minimal-pairs";
+import { pillarScores } from "@/lib/prosody";
 import { addCheckpoint } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
@@ -232,7 +233,8 @@ export function Onboarding() {
       completedTakes.reduce((s, t) => s + t.attempt.overall, 0) / Math.max(1, completedTakes.length),
     );
     const avgAccuracy = Math.round(
-      completedTakes.reduce((s, t) => s + t.result.scores.accuracy, 0) / Math.max(1, completedTakes.length),
+      completedTakes.reduce((s, t) => s + pillarScores(t.result, t.prosody, lang).sounds, 0) /
+        Math.max(1, completedTakes.length),
     );
     const avgIntel = Math.round(
       completedTakes.reduce((s, t) => s + t.result.scores.intelligibility, 0) / Math.max(1, completedTakes.length),
