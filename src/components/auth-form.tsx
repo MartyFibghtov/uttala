@@ -85,7 +85,7 @@ export function AuthForm({ mode, googleEnabled }: { mode: Mode; googleEnabled?: 
         : null);
 
   useEffect(() => {
-    if (googleEnabled !== undefined) return;
+    if (googleEnabled !== undefined || (mode !== "sign-in" && mode !== "sign-up")) return;
     let cancelled = false;
     fetch("/api/plans")
       .then((r) => r.json() as Promise<{ google?: boolean }>)
@@ -94,7 +94,7 @@ export function AuthForm({ mode, googleEnabled }: { mode: Mode; googleEnabled?: 
     return () => {
       cancelled = true;
     };
-  }, [googleEnabled]);
+  }, [googleEnabled, mode]);
 
   const signInWithGoogle = async () => {
     setGoogleBusy(true);
@@ -288,22 +288,28 @@ export function AuthForm({ mode, googleEnabled }: { mode: Mode; googleEnabled?: 
         </div>
       </div>
 
-      <div className="aurora-wash relative hidden overflow-hidden border-l bg-secondary/40 lg:block">
+      <div className="aurora-wash relative hidden overflow-hidden border-l bg-secondary/40 lg:flex lg:flex-col">
         <Image
-          src={ARTWORKS.heroAcoustic.src}
+          src={ARTWORKS.authAcoustic.src}
           alt=""
           fill
-          sizes="50vw"
+          quality={95}
+          sizes="(min-width: 1024px) 50vw, 1px"
           loading="eager"
           fetchPriority="high"
-          className="object-cover object-center dark:brightness-[0.8]"
+          className="object-cover object-top dark:brightness-[0.86] dark:contrast-[1.04]"
         />
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-background/90 via-background/20 to-transparent" />
-        <div className="absolute right-10 bottom-10 left-10 max-w-md rounded-2xl border bg-card/85 p-6 shadow-lg ring-1 ring-black/5 backdrop-blur-md dark:ring-white/10">
-          <p className="text-2xl font-semibold tracking-tight">Hear it. Say it. See exactly what to fix.</p>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Word-by-word feedback on your own voice, in 17 languages.
-          </p>
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-background/35 via-transparent to-background/20" />
+        <div className="relative z-10 px-8 pt-10 xl:px-12 xl:pt-12">
+          <div className="relative mx-auto max-w-lg overflow-hidden rounded-2xl border border-border/80 bg-card/88 p-6 shadow-lg ring-1 ring-black/5 backdrop-blur-md dark:ring-white/10">
+            <div className="aurora-line absolute inset-x-6 top-0" aria-hidden="true" />
+            <p className="text-balance text-2xl font-semibold tracking-tight text-card-foreground">
+              Hear it. Say it. See exactly what to fix.
+            </p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Word-by-word feedback on your own voice, in 17 languages.
+            </p>
+          </div>
         </div>
       </div>
     </div>

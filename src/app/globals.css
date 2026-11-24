@@ -197,12 +197,8 @@
 
 @layer components {
 /* ---------------------------------------------------------------------------
-   Orbs: pearlescent voice spheres, the product's only real use of colour.
-   Each palette is a pastel body (o1 → o2), a deeper shade for the core (o3),
-   a near-white highlight (o4) and a second hue (o5) that drifts through it so
-   the surface reads as iridescent rather than a flat ball. Lighting is fixed
-   (top-left key, soft rim at the bottom) while the colour inside slowly turns.
-   Blur and shading scale with --orb-size so 14px and 168px orbs both hold up.
+   Orbs: ElevenLabs-style WebGL2 polar shader speech entities, scaled cleanly
+   from 14px inline indicators up to 168px hero spheres.
    --------------------------------------------------------------------------- */
 .orb {
   --orb-size: 48px;
@@ -215,21 +211,57 @@
   isolation: isolate;
   overflow: hidden;
   border-radius: 9999px;
-  background: radial-gradient(130% 130% at 30% 22%, var(--o4) 0%, var(--o1) 26%, var(--o2) 64%, var(--o3) 100%);
-  box-shadow:
-    0 calc(var(--orb-size) * 0.14) calc(var(--orb-size) * 0.32) calc(var(--orb-size) * -0.18)
-      color-mix(in oklab, var(--o3) 48%, transparent),
-    0 1px 2px color-mix(in oklab, var(--o3) 22%, transparent);
+  translate: 0 0;
+  scale: 1;
 }
-.orb::before,
-.orb::after {
+.orb:not([data-canvas="true"]) {
+  background: radial-gradient(
+    130% 130% at 30% 22%,
+    var(--o4) 0%,
+    var(--o1) 24%,
+    var(--o2) 58%,
+    var(--o3) 86%,
+    color-mix(in oklab, var(--o3) 65%, black) 100%
+  );
+  box-shadow:
+    0 calc(var(--orb-size) * 0.16) calc(var(--orb-size) * 0.36) calc(var(--orb-size) * -0.14)
+      color-mix(in oklab, var(--o3) 56%, transparent),
+    0 1px 2px color-mix(in oklab, var(--o3) 26%, transparent);
+}
+.orb[data-canvas="true"] {
+  background: color-mix(in oklab, var(--o3) 18%, transparent);
+  box-shadow:
+    0 calc(var(--orb-size) * 0.14) calc(var(--orb-size) * 0.34) calc(var(--orb-size) * -0.14)
+      color-mix(in oklab, var(--o3) 44%, transparent),
+    0 1px 2px color-mix(in oklab, var(--o3) 20%, transparent),
+    inset 0 0 0 1px rgb(255 255 255 / 0.12);
+}
+.orb[data-canvas="true"][data-orb-variant="eleven-ui"] {
+  padding: clamp(2px, calc(var(--orb-size) * 0.055), 4px);
+  background: rgb(140 140 148 / 0.16);
+  box-shadow:
+    0 calc(var(--orb-size) * 0.14) calc(var(--orb-size) * 0.34) calc(var(--orb-size) * -0.14)
+      color-mix(in oklab, var(--o3) 40%, transparent),
+    inset 0 2px 5px rgb(0 0 0 / 0.18),
+    0 0 0 1px rgb(128 128 136 / 0.18);
+}
+.dark .orb[data-canvas="true"][data-orb-variant="eleven-ui"] {
+  background: rgb(255 255 255 / 0.07);
+  box-shadow:
+    0 calc(var(--orb-size) * 0.14) calc(var(--orb-size) * 0.34) calc(var(--orb-size) * -0.14)
+      color-mix(in oklab, var(--o3) 48%, transparent),
+    inset 0 2px 7px rgb(0 0 0 / 0.55),
+    0 0 0 1px rgb(255 255 255 / 0.12);
+}
+.orb:not([data-canvas="true"])::before,
+.orb:not([data-canvas="true"])::after {
   content: "";
   position: absolute;
   border-radius: inherit;
   pointer-events: none;
 }
-/* Slowly turning colour field inside the sphere. */
-.orb::before {
+/* Slowly turning colour field inside the fallback sphere. */
+.orb:not([data-canvas="true"])::before {
   inset: -22%;
   background:
     radial-gradient(48% 42% at 30% 72%, var(--o5) 0%, transparent 72%),
@@ -238,10 +270,12 @@
     conic-gradient(from 200deg at 52% 50%, var(--o2), var(--o5), var(--o1), var(--o4), var(--o2));
   filter: blur(calc(var(--orb-size) * 0.11));
   opacity: 0.9;
-  animation: orb-spin 22s linear infinite;
+  @media (prefers-reduced-motion: no-preference) {
+    animation: orb-spin 22s linear infinite;
+  }
 }
 /* Fixed lighting: frosted key light, faint bounce light and a glass rim. */
-.orb::after {
+.orb:not([data-canvas="true"])::after {
   inset: 0;
   background:
     radial-gradient(38% 30% at 34% 22%, rgb(255 255 255 / 0.82) 0%, rgb(255 255 255 / 0.28) 46%, transparent 72%),
@@ -261,15 +295,8 @@
 .orb-sky { --o1: #cfe2f5; --o2: #8cb4e0; --o3: #46699c; --o4: #f5faff; --o5: #c4e7ec; }
 /* Sage: pale mint with a mist sheen. */
 .orb-moss { --o1: #d0e9d9; --o2: #8fc2a5; --o3: #4c8068; --o4: #f4fbf7; --o5: #cfe2f2; }
-.orb-float { animation: orb-float 9s ease-in-out infinite; }
-.orb-float-slow { animation: orb-float 13s ease-in-out -4s infinite; }
-
 @keyframes orb-spin {
   to { transform: rotate(360deg); }
-}
-@keyframes orb-float {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-6px); }
 }
 
 /* Hairline signature across the top: a single pearl sheen that fades out at
@@ -333,73 +360,6 @@
     radial-gradient(60% 100% at 88% 0%, rgb(180 150 216 / 0.1), transparent 72%);
 }
 
-/* ---------------------------------------------------------------------------
-   Premium: anything that sells or marks a paid plan. A 1px iridescent ring in
-   the orb palette turns slowly around the element, with a soft multicolour
-   halo underneath. The element keeps its own fill, so the theme stays neutral.
-   --------------------------------------------------------------------------- */
-@property --premium-angle {
-  syntax: "<angle>";
-  inherits: false;
-  initial-value: 0deg;
-}
-.premium-glow {
-  position: relative;
-  box-shadow:
-    -10px 3px 22px -10px rgb(233 144 108 / 0.55),
-    10px 3px 22px -10px rgb(140 180 224 / 0.6),
-    0 10px 24px -12px rgb(184 146 214 / 0.65),
-    0 -4px 16px -10px rgb(226 178 106 / 0.45);
-}
-.premium-glow:hover {
-  box-shadow:
-    -14px 3px 32px -7px rgb(233 144 108 / 0.52),
-    14px 3px 32px -7px rgb(140 180 224 / 0.58),
-    0 14px 34px -9px rgb(184 146 214 / 0.65),
-    0 -6px 24px -8px rgb(226 178 106 / 0.45);
-}
-.dark .premium-glow {
-  box-shadow:
-    -12px 3px 28px -8px rgb(233 144 108 / 0.42),
-    12px 3px 28px -8px rgb(140 180 224 / 0.48),
-    0 12px 30px -10px rgb(184 146 214 / 0.55),
-    0 -5px 22px -9px rgb(226 178 106 / 0.36);
-}
-.dark .premium-glow:hover {
-  box-shadow:
-    -12px 3px 26px -9px rgb(233 144 108 / 0.65),
-    12px 3px 26px -9px rgb(140 180 224 / 0.7),
-    0 12px 28px -11px rgb(184 146 214 / 0.75),
-    0 -5px 18px -9px rgb(226 178 106 / 0.55);
-}
-.premium-glow::before {
-  content: "";
-  position: absolute;
-  inset: -1px;
-  padding: 1px;
-  border-radius: inherit;
-  pointer-events: none;
-  background: conic-gradient(
-    from var(--premium-angle),
-    #e2b26a,
-    #e9906c,
-    #f1bfd0,
-    #b892d6,
-    #8cb4e0,
-    #8fc2a5,
-    #e2b26a
-  );
-  -webkit-mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  animation: premium-turn 7s linear infinite;
-}
-@keyframes premium-turn {
-  to { --premium-angle: 360deg; }
-}
-
 /* Paid plan names: the same palette as text, kept legible in both themes. */
 .premium-text {
   background: linear-gradient(90deg, #b5773a, #c4664a, #8e62b8, #4f78b0);
@@ -442,13 +402,123 @@ details.disclosure:not([open])::details-content {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .orb::before,
-  .orb::after,
-  .orb-float,
-  .orb-float-slow,
-  .premium-glow::before {
-    animation: none;
+/* Entry transitions for practice/drill verdict banners, status cards and newly added items. */
+.transition-entry {
+  display: block;
+  opacity: 1;
+  translate: 0 0;
+  scale: 1;
+  transition:
+    display,
+    opacity ease-out,
+    translate cubic-bezier(0.22, 1, 0.36, 1),
+    scale cubic-bezier(0.22, 1, 0.36, 1);
+  transition-duration: 0.28s;
+  transition-behavior: allow-discrete;
+}
+
+.transition-entry:where([hidden], [data-closing]) {
+  opacity: 0;
+  translate: 0 -8px;
+  scale: 0.98;
+}
+
+.transition-entry[hidden] {
+  display: none;
+}
+
+/* Directional stage transition when switching between drill words, ladder steps or sentences. */
+.prompt-stage-enter {
+  opacity: 1;
+  translate: 0 0;
+  transition:
+    opacity 0.24s ease-out,
+    translate 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Tactile pop for clear takes, streak milestones and mastered badges. */
+.verdict-pop {
+  @media (prefers-reduced-motion: no-preference) {
+    animation: verdict-pop 0.42s cubic-bezier(0.34, 1.56, 0.64, 1);
   }
 }
+
+/* Gentle horizontal shake for mispronounced words, wrong choices and streak resets. */
+.verdict-shake {
+  @media (prefers-reduced-motion: no-preference) {
+    animation: verdict-shake 0.38s cubic-bezier(0.36, 0.07, 0.19, 0.97);
+  }
+}
+
+@keyframes verdict-pop {
+  0% {
+    opacity: 0;
+    scale: 0.55;
+  }
+  65% {
+    opacity: 1;
+    scale: 1.14;
+  }
+  100% {
+    opacity: 1;
+    scale: 1;
+  }
+}
+
+@keyframes verdict-shake {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  20% {
+    translate: -5px 0;
+  }
+  40% {
+    translate: 5px 0;
+  }
+  60% {
+    translate: -3px 0;
+  }
+  80% {
+    translate: 3px 0;
+  }
+}
+
+}
+
+@starting-style {
+  .transition-entry {
+    opacity: 0;
+    translate: 0 10px;
+    scale: 0.98;
+  }
+  .prompt-stage-enter {
+    opacity: 0;
+    translate: 12px 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .transition-entry {
+    translate: none;
+    scale: none;
+    transition-duration: 0.1s;
+  }
+  .transition-entry:where([hidden], [data-closing]) {
+    translate: none;
+    scale: none;
+  }
+  .prompt-stage-enter {
+    translate: none;
+    transition-duration: 0.1s;
+  }
+  @starting-style {
+    .transition-entry {
+      translate: none;
+      scale: none;
+    }
+    .prompt-stage-enter {
+      translate: none;
+    }
+  }
 }

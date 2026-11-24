@@ -7,7 +7,9 @@ import { APP_SCHEMA, db, dbConfig } from "./db";
 import { sendEmail } from "./email";
 import { deleteCustomerFor } from "./stripe";
 
-export const googleEnabled = () => !!process.env.GOOGLE_CLIENT_ID && !!process.env.GOOGLE_CLIENT_SECRET;
+const googleClientId = () => process.env.GOOGLE_CLIENT_ID?.trim() || "";
+const googleClientSecret = () => process.env.GOOGLE_CLIENT_SECRET?.trim() || "";
+export const googleEnabled = () => !!googleClientId() && !!googleClientSecret();
 
 const isProduction = process.env.NODE_ENV === "production";
 
@@ -114,8 +116,8 @@ function create() {
     socialProviders: googleEnabled()
       ? {
           google: {
-            clientId: process.env.GOOGLE_CLIENT_ID as string,
-            clientSecret: process.env.GOOGLE_CLIENT_SECRET as string,
+            clientId: googleClientId(),
+            clientSecret: googleClientSecret(),
             prompt: "select_account",
           },
         }

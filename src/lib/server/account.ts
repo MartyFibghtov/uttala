@@ -37,7 +37,13 @@ export async function getProfile(userId: string): Promise<Profile> {
 }
 
 export async function saveProfile(userId: string, patch: Partial<Profile>): Promise<Profile> {
-  const next = { ...(await getProfile(userId)), ...patch };
+  const prev = await getProfile(userId);
+  const next: Profile = {
+    ...prev,
+    ...patch,
+    // Once onboarded, keep it monotonic so client patches cannot reset daily counting.
+    onboarded: prev.onboarded || Boolean(patch.onboarded),
+  };
   await db().execute({
     sql: `INSERT INTO profile (user_id, lang, level, onboarded, updated_at) VALUES (?, ?, ?, ?, ?)
           ON CONFLICT(user_id) DO UPDATE SET lang = excluded.lang, level = excluded.level,
@@ -48,15 +54,27 @@ export async function saveProfile(userId: string, patch: Partial<Profile>): Prom
 }
 
 /** What this user may do right now. Sound-level scoring also needs the phoneme engine to be configured. */
-export async function getAccess(userId: string): Promise<{ plan: PlanId; entitlements: Entitlements; level: LevelId }> {
+export async function getAccess(userId: string): Promise<{
+  plan: PlanId;
+  entitlements: Entitlements;
+  level: LevelId;
+  onboarded: boolean;
+}> {
   const [row, profile] = await Promise.all([getSubscriptionRow(userId), getProfile(userId)]);
   // Without payments configured there is nothing to sell, so nothing is locked.
   const plan: PlanId = stripeEnabled() ? planOf(row) : "pro";
   const base = PLANS[plan].entitlements;
   const hasSoundEngine = hasAzure() || hasOpenAi();
-  return { plan, entitlements: { ...base, phonemes: base.phonemes && hasSoundEngine }, level: profile.level };
+  return {
+    plan,
+    entitlements: { ...base, phonemes: base.phonemes && hasSoundEngine },
+    level: profile.level,
+    onboarded: profile.onboarded,
+  };
 }
 
+export const ONBOARDING_ANALYSES_CAP = 20;
+const ONBOARDING_BUCKET = "onboarding";
 const today = () => new Date().toISOString().slice(0, 10);
 
 export async function analysesToday(userId: string): Promise<number> {
@@ -67,22 +85,40 @@ export async function analysesToday(userId: string): Promise<number> {
   return row?.analyses ?? 0;
 }
 
-/** Count one analysis against today's allowance. Returns false when the allowance is used up. */
-export async function consumeAnalysis(userId: string, limit: number): Promise<boolean> {
+async function consumeBucketAnalysis(userId: string, bucket: string, limit: number): Promise<boolean> {
   const res = await db().execute({
     sql: `INSERT INTO usage (user_id, day, analyses) VALUES (?, ?, 1)
           ON CONFLICT(user_id, day) DO UPDATE SET analyses = analyses + 1 WHERE analyses < ?`,
-    args: [userId, today(), limit],
+    args: [userId, bucket, limit],
   });
   return res.rowsAffected > 0;
 }
 
-/** Give an analysis back when it failed on our side. */
-export async function refundAnalysis(userId: string): Promise<void> {
+async function refundBucketAnalysis(userId: string, bucket: string): Promise<void> {
   await db().execute({
     sql: "UPDATE usage SET analyses = MAX(0, analyses - 1) WHERE user_id = ? AND day = ?",
-    args: [userId, today()],
+    args: [userId, bucket],
   });
+}
+
+/** Count one analysis against today's allowance. Returns false when the allowance is used up. */
+export function consumeAnalysis(userId: string, limit: number): Promise<boolean> {
+  return consumeBucketAnalysis(userId, today(), limit);
+}
+
+/** Give an analysis back when it failed on our side. */
+export function refundAnalysis(userId: string): Promise<void> {
+  return refundBucketAnalysis(userId, today());
+}
+
+/** Count one onboarding analysis in a separate bucket so daily app usage starts at 0 after landing. */
+export function consumeOnboardingAnalysis(userId: string, limit = ONBOARDING_ANALYSES_CAP): Promise<boolean> {
+  return consumeBucketAnalysis(userId, ONBOARDING_BUCKET, limit);
+}
+
+/** Refund an onboarding analysis when scoring failed on our side. */
+export function refundOnboardingAnalysis(userId: string): Promise<void> {
+  return refundBucketAnalysis(userId, ONBOARDING_BUCKET);
 }
 
 export async function consumeVoiceChars(userId: string, chars: number, limit: number): Promise<boolean> {

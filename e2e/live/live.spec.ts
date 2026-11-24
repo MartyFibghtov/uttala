@@ -27,7 +27,7 @@ async function onboardIntermediate(page: Page) {
     if (await level.count()) await level.first().click().catch(() => undefined);
     const sample = page.getByRole("button", { name: /Use sample scan/ });
     const next = page.getByRole("button", {
-      name: /^(Continue|Start 3-part scan|Next:|See my|See what|How scoring|Practise my focus|Finish|Start practising)/,
+      name: /^(Continue|Start\b|Next:|See my|See what|How scoring)/,
     });
     const target = (await sample.count()) ? sample : next;
     await target.first().click({ timeout: 4000 }).catch(() => undefined);

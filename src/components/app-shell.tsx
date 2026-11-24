@@ -104,7 +104,7 @@ function UsageCard() {
       </div>
       <Progress value={(left / me.usage.limit) * 100} className="h-1.5" aria-label="Recordings left today" />
       {free && (
-        <Button size="sm" className="premium-glow w-full rounded-full" onClick={() => promptUpgrade(left ? "prosody" : "limit")}>
+        <Button size="sm" variant="outline" className="w-full rounded-full" onClick={() => promptUpgrade(left ? "prosody" : "limit")}>
           {me.trialAvailable ? "Try Plus free" : "Upgrade"}
         </Button>
       )}

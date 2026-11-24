@@ -5,7 +5,7 @@ import { align, normalize, sameWord, similarity, timeTokens, tokenize, type Toke
 import type { AssessResult, CheckDepth, WordResult } from "../types";
 import { assessWithAzure, hasAzure, type AzureAssessment } from "./azure";
 import { forcedAlign, hasElevenLabs, transcribe, type ForcedAlignment, type Transcript } from "./elevenlabs";
-import { assessWithOpenAi, hasOpenAi, type OpenAiAssessment } from "./openai";
+import { assessWithOpenAi, hasOpenAi, OpenAiHttpError, type OpenAiAssessment } from "./openai";
 
 const clamp = (v: number, lo = 0, hi = 100) => Math.max(lo, Math.min(hi, v));
 const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
@@ -29,7 +29,9 @@ async function assessWithOpenAiRetry(wav: Blob, text: string, lang: string): Pro
     const first = await assessWithOpenAi(wav, text, lang);
     if (!unusable(first)) return first;
   } catch (err) {
-    if (!(err instanceof SyntaxError)) throw err;
+    const transient = err instanceof OpenAiHttpError && (err.status === 429 || err.status >= 500);
+    if (!(err instanceof SyntaxError) && !transient) throw err;
+    if (transient) await new Promise((r) => setTimeout(r, 400));
   }
   return assessWithOpenAi(wav, text, lang);
 }

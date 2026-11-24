@@ -6,6 +6,7 @@ import {
   AlertCircle,
   ArrowLeftRight,
   AudioWaveform,
+  Check,
   CheckCircle2,
   Gauge,
   Headphones,
@@ -15,10 +16,12 @@ import {
   Mic,
   Pencil,
   RotateCcw,
+  Sparkles,
   Square,
   Trophy,
   User,
   Volume2,
+  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { LiveBars } from "@/components/live-bars";
@@ -47,7 +50,7 @@ import {
   type PitchTrack,
 } from "@/lib/audio";
 import { getLanguage, type Phrase } from "@/lib/languages";
-import { LEVELS, type LevelId } from "@/lib/levels";
+import { LEVELS, SCORE_SCALE, type LevelId } from "@/lib/levels";
 import { resetTimeLabel } from "@/lib/plans";
 import { buildReferenceContour } from "@/components/pitch-chart";
 import type { Deduction } from "@/lib/deductions";
@@ -56,7 +59,7 @@ import { bandFor, DEPTH_NOTE } from "@/lib/score-bands";
 import { rateWithDeductions } from "@/lib/rating";
 import { soundForIpa } from "@/lib/sounds";
 import { isShort, SHORT, splitShort, wordCount } from "@/lib/short";
-import { bestKey, recordAttempt, useStore } from "@/lib/store";
+import { bestKey, recordAttempt, useStore, type DrillWordTransition, type Recorded } from "@/lib/store";
 import { timeTokens, tokenize, type Span } from "@/lib/text";
 import type { AssessResult, Attempt, FocusSound, ProsodyResult, TtsResponse, WordResult, WordStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -228,8 +231,11 @@ interface Outcome {
   reference: Reference | null;
   attempt: Attempt;
   personalBest: boolean;
+  previousBest?: number;
   /** Unclear words that did not fit the drill list on this plan. */
   leftOut: string[];
+  /** Per-word drill transitions produced by this attempt. */
+  transitions: DrillWordTransition[];
 }
 
 interface Props {
@@ -243,12 +249,25 @@ interface Props {
   onTextChange?: (text: string) => void;
   /** Called when the learner finishes editing, so a long text can be split into short sentences. */
   onEditDone?: (text: string) => void;
-  onResult?: (result: AssessResult, attempt: Attempt) => void;
+  /** Called when recording begins so the parent can pin the active item. */
+  onRecordStart?: () => void;
+  onResult?: (result: AssessResult, attempt: Attempt, recorded: Recorded) => void;
   /** Shown beside the record button once there is a result, e.g. "Next phrase". */
   after?: React.ReactNode;
 }
 
-export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChange, onEditDone, onResult, after }: Props) {
+export function PracticeSession({
+  lang,
+  text,
+  level,
+  voiceId,
+  phrase,
+  onTextChange,
+  onEditDone,
+  onRecordStart,
+  onResult,
+  after,
+}: Props) {
   const { me, noteAnalysis, promptUpgrade } = useAccount();
   const ent = me.entitlements;
   const language = getLanguage(lang);
@@ -379,7 +398,9 @@ export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChan
           reference,
           attempt: recorded.attempt,
           personalBest: recorded.personalBest,
+          previousBest: recorded.previousBest,
           leftOut: recorded.leftOut,
+          transitions: recorded.transitions,
         });
         if (!reference && live) {
           void refPromise.then((lateRef) => {
@@ -401,7 +422,7 @@ export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChan
             });
           });
         }
-        onResult?.(data, recorded.attempt);
+        onResult?.(data, recorded.attempt, recorded);
       } catch (err) {
         fail(err, "Something went wrong.");
       } finally {
@@ -423,6 +444,7 @@ export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChan
       promptUpgrade("limit");
       return;
     }
+    onRecordStart?.();
     stopPlayback();
     // Warm reference audio while the user is speaking so it's ready when recording stops.
     if (live && target) {
@@ -534,11 +556,29 @@ export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChan
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
       <div className="min-w-0 space-y-6">
         <Card className="gap-0 overflow-hidden py-0">
+          {shown && (
+            <AttemptVerdictBanner
+              key={shown.attempt.id}
+              outcome={shown}
+              cap={ent.maxDrillWords}
+            />
+          )}
           <CardContent className="p-0">
             <div className={cn("p-5 md:p-6", onTextChange ? "min-h-52" : "min-h-28")}>
-              <div dir={language.rtl ? "rtl" : "ltr"} lang={lang}>
+              <div
+                key={`${lang}:${text}`}
+                dir={language.rtl ? "rtl" : "ltr"}
+                lang={lang}
+                className="prompt-stage-enter"
+              >
                 {shown ? (
-                  <ScoredText text={shown.text} words={shown.result.words} selected={selected} onSelect={setSelected} />
+                  <ScoredText
+                    text={shown.text}
+                    words={shown.result.words}
+                    selected={selected}
+                    onSelect={setSelected}
+                    attemptId={shown.attempt.id}
+                  />
                 ) : editing && onTextChange ? (
                   <Textarea
                     autoFocus
@@ -689,7 +729,7 @@ export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChan
             )}
           </div>
         )}
-        {shown && shown.leftOut.length > 0 && ent.maxDrillWords !== null && me.billing && (
+        {shown && shown.leftOut.length > 0 && ent.maxDrillWords !== null && (
           <DrillFullCard words={shown.leftOut} cap={ent.maxDrillWords} />
         )}
         {outOfRecordings && !recorder.recording && (
@@ -780,16 +820,216 @@ export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChan
   );
 }
 
+function AttemptVerdictBanner({ outcome, cap }: { outcome: Outcome; cap: number | null }) {
+  const words = outcome.result.words;
+  const overall = overallFor(outcome.result, outcome.prosody);
+  const single = words.length === 1 ? words[0] : null;
+  const badWords = words.filter((w) => w.status !== "ok");
+  const mispronouncedCount = words.filter((w) => w.status === "mispronounced" || w.status === "omitted").length;
+
+  const primaryTransition = single
+    ? outcome.transitions.find(
+        (t) =>
+          t.status === "mastered" ||
+          t.status === "resting" ||
+          t.status === "streak-up" ||
+          t.status === "streak-reset" ||
+          t.status === "resting-early",
+      )
+    : undefined;
+
+  const addedToDrills = outcome.transitions.filter((t) => t.status === "added").map((t) => t.text);
+  const cappedByLimit = outcome.transitions.filter((t) => t.status === "capped").map((t) => t.text);
+  const masteredNow = outcome.transitions.filter((t) => t.status === "mastered").map((t) => t.text);
+  const restingNow = outcome.transitions.filter((t) => t.status === "resting").map((t) => t.text);
+
+  let kind: "success" | "almost" | "failure";
+  if (single) {
+    kind =
+      single.score >= SCORE_SCALE.clear
+        ? "success"
+        : single.score >= SCORE_SCALE.unclear
+          ? "almost"
+          : "failure";
+  } else {
+    kind =
+      overall >= SCORE_SCALE.clear && badWords.length === 0
+        ? "success"
+        : overall >= 65 && mispronouncedCount === 0
+          ? "almost"
+          : overall >= 72 && badWords.length <= 1
+            ? "almost"
+            : "failure";
+  }
+
+  let headline = "";
+  let detail = "";
+
+  if (single && primaryTransition) {
+    const t = primaryTransition;
+    if (t.status === "mastered") {
+      headline = `Mastered! “${t.text}” passed its final check (${single.score}/100)`;
+      detail = "This word graduated to your Mastered list. Advance when you are ready.";
+    } else if (t.status === "resting") {
+      headline =
+        t.checkIndex === 1
+          ? `3 of 3 clear! “${t.text}” is locked in (${single.score}/100)`
+          : `Spaced check ${(t.checkIndex ?? 2) - 1} passed! (${single.score}/100)`;
+      detail = `Now resting for ${t.dueDays ?? 2} days before its next check. Review your take or move to the next word.`;
+    } else if (t.status === "streak-up") {
+      const left = Math.max(1, 3 - t.newStreak);
+      headline = `Clear take! Streak ${t.newStreak} of 3 in a row (${single.score}/100)`;
+      detail = `Say “${t.text}” clearly ${left} more time${left === 1 ? "" : "s"} in a row to send it to rest.`;
+    } else if (t.status === "resting-early") {
+      headline = `Clear take! (${single.score}/100)`;
+      detail = `Still resting until its scheduled check in ${t.dueDays ?? 1} day${t.dueDays === 1 ? "" : "s"}.`;
+    } else if (t.status === "streak-reset") {
+      headline =
+        t.prevStreak > 0
+          ? `Unclear take (${single.score}/100) — streak reset from ${t.prevStreak} of 3 to 0`
+          : `Not clear yet (${single.score}/100) — need ${SCORE_SCALE.clear}+ for take 1 of 3`;
+      detail = single.heard
+        ? `Heard as “${single.heard}”. Listen to the target below and try again.`
+        : (single.fix ?? "Listen to the reference once, then record again.");
+    }
+  } else if (single) {
+    if (kind === "success") {
+      headline = `Clear! “${single.text}” came through cleanly (${single.score}/100)`;
+      detail =
+        outcome.personalBest && outcome.previousBest !== undefined
+          ? `Up +${overall - outcome.previousBest} pts from your previous best.`
+          : "Sounded clear. Try it again or continue to the next step.";
+    } else if (kind === "almost") {
+      headline = `Almost there on “${single.text}” (${single.score}/100)`;
+      detail =
+        single.fix ??
+        (single.heard
+          ? `Heard as “${single.heard}”. Aim for ${SCORE_SCALE.clear}+ to mark this word clear.`
+          : `Score ${SCORE_SCALE.clear}+ to mark this word clear. Listen and try once more.`);
+    } else {
+      headline = `“${single.text}” needs another try (${single.score}/100)`;
+      detail = single.heard
+        ? `Heard as “${single.heard}”. Compare your audio with the reference below, then try again.`
+        : (single.diagnosis ?? "Listen slowly to the reference below, then record again.");
+    }
+  } else {
+    if (kind === "success") {
+      headline = `Clean take! Every word came through clearly (${overall}/100)`;
+      detail =
+        outcome.personalBest && outcome.previousBest !== undefined
+          ? `New personal best (+${overall - outcome.previousBest} pts).`
+          : "All words were clear. Review any word below or continue when you are ready.";
+    } else if (kind === "almost") {
+      headline = `Good take (${overall}/100) — ${badWords.length} word${badWords.length === 1 ? "" : "s"} to polish`;
+      detail = `Tap ${badWords.length === 1 ? `“${badWords[0].text}”` : "the highlighted words"} below to compare your recording with the reference.`;
+    } else {
+      headline = `Needs another take (${overall}/100) — ${badWords.length} word${badWords.length === 1 ? "" : "s"} unclear`;
+      detail = `Tap the highlighted words below to hear what went wrong, or practise the hard words one at a time.`;
+    }
+  }
+
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className={cn(
+        "transition-entry border-b px-5 py-3.5 text-sm",
+        kind === "success" &&
+          "border-emerald-200 bg-emerald-50/90 text-emerald-950 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-100",
+        kind === "almost" &&
+          "border-amber-200 bg-amber-50/90 text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-100",
+        kind === "failure" &&
+          "border-red-200 bg-red-50/90 text-red-950 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-100",
+      )}
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-start gap-2.5">
+          <span
+            className={cn(
+              "mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full",
+              kind === "success" && "verdict-pop bg-emerald-600 text-white",
+              kind === "almost" && "verdict-pop bg-amber-500 text-white",
+              kind === "failure" && "verdict-shake bg-red-600 text-white",
+            )}
+          >
+            {kind === "success" ? (
+              <Check className="size-3.5 stroke-[2.5]" />
+            ) : kind === "almost" ? (
+              <AlertCircle className="size-3.5" />
+            ) : (
+              <XCircle className="size-3.5" />
+            )}
+          </span>
+          <div className="space-y-1">
+            <p className="font-semibold leading-snug">{headline}</p>
+            <p className="text-xs opacity-85">{detail}</p>
+            {(addedToDrills.length > 0 || cappedByLimit.length > 0 || masteredNow.length > 0 || restingNow.length > 0) && (
+              <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                {masteredNow.length > 0 && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-600/15 px-2 py-0.5 text-[11px] font-medium">
+                    <Sparkles className="size-3" />
+                    Mastered: {masteredNow.map((w) => `“${w}”`).join(", ")}
+                  </span>
+                )}
+                {restingNow.length > 0 && !single && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-600/15 px-2 py-0.5 text-[11px] font-medium">
+                    <Check className="size-3" />
+                    3/3 clear → resting: {restingNow.map((w) => `“${w}”`).join(", ")}
+                  </span>
+                )}
+                {addedToDrills.length > 0 && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-background/80 px-2 py-0.5 text-[11px] font-medium text-foreground">
+                    Added to Drills: {addedToDrills.slice(0, 3).map((w) => `“${w}”`).join(", ")}
+                    {addedToDrills.length > 3 ? ` +${addedToDrills.length - 3}` : ""}
+                  </span>
+                )}
+                {cappedByLimit.length > 0 && (
+                  <Link
+                    href="/drills"
+                    className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-background/85 px-2 py-0.5 text-[11px] font-medium text-foreground underline-offset-2 hover:underline"
+                  >
+                    {cap ?? 5}-word drill limit full: {cappedByLimit.slice(0, 2).map((w) => `“${w}”`).join(", ")}
+                    {cappedByLimit.length > 2 ? ` +${cappedByLimit.length - 2}` : ""} in waiting list →
+                  </Link>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5 text-xs font-medium">
+          {outcome.attempt.xp !== undefined && outcome.attempt.xp > 0 && (
+            <span className="rounded-full bg-background/80 px-2.5 py-0.5 tabular-nums text-foreground">
+              +{outcome.attempt.xp} pts
+            </span>
+          )}
+          {outcome.personalBest && (
+            <span className="verdict-pop inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2.5 py-0.5 text-white">
+              <Trophy className="size-3" />
+              New best
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DrillFullCard({ words, cap }: { words: string[]; cap: number }) {
   const { me } = useAccount();
-  const nudge = useNudge("drills", true);
+  const nudge = useNudge("drills", me.billing);
   const shownWords = words.slice(0, 4).map((w) => `“${w}”`).join(", ");
-  if (!nudge.visible) {
+  if (!nudge.visible || !me.billing) {
     return (
-      <p className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
-        Your drill list holds {cap} words on the free plan, so {shownWords} did not fit this time. They are listed under
-        Drills.
-      </p>
+      <div className="transition-entry flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300/70 bg-amber-50/60 px-4 py-3 text-sm dark:border-amber-900/60 dark:bg-amber-950/25">
+        <p className="text-muted-foreground">
+          <span className="font-medium text-foreground">All {cap} drill slots are in use.</span> Your existing {cap} drill
+          words were kept safe, and {shownWords}
+          {words.length > 4 ? ` and ${words.length - 4} more` : ""} moved to your waiting list so nothing disappears.
+        </p>
+        <Button asChild size="sm" variant="outline" className="rounded-full">
+          <Link href="/drills">Manage {cap} slots in Drills</Link>
+        </Button>
+      </div>
     );
   }
   return (
@@ -800,9 +1040,13 @@ function DrillFullCard({ words, cap }: { words: string[]; cap: number }) {
       onDismiss={nudge.dismiss}
     >
       <p>
-        These unclear words from this take did not fit: <span className="font-medium text-foreground">{shownWords}</span>
-        {words.length > 4 ? ` and ${words.length - 4} more` : ""}. The free list keeps your {cap} weakest words, and you
-        can keep working on those. Plus has no limit, so nothing is left out.
+        Your existing {cap} drill words were kept safe, and these unclear words from this take moved to your waiting list:{" "}
+        <span className="font-medium text-foreground">{shownWords}</span>
+        {words.length > 4 ? ` and ${words.length - 4} more` : ""}. You can swap them into a slot under{" "}
+        <Link href="/drills" className="font-medium text-foreground underline underline-offset-4">
+          Drills
+        </Link>
+        , or unlock Plus for an unlimited drill list.
       </p>
     </UpgradeCard>
   );
@@ -931,29 +1175,35 @@ function ScoredText({
   words,
   selected,
   onSelect,
+  attemptId,
 }: {
   text: string;
   words: WordResult[];
   selected: number | null;
   onSelect: (i: number) => void;
+  attemptId?: string;
 }) {
   const parts: React.ReactNode[] = [];
   let cursor = 0;
+  const single = words.length === 1;
   for (const w of words) {
     if (w.from > cursor) parts.push(text.slice(cursor, w.from));
     parts.push(
       <button
-        key={w.index}
+        key={`${attemptId ?? "take"}-${w.index}`}
         type="button"
         onClick={() => onSelect(w.index)}
         aria-label={`${w.text}: ${STATUS_LABEL[w.status]}, ${w.score} out of 100`}
         className={cn(
-          "rounded-md px-0.5 transition-colors",
+          "inline-flex items-center gap-1 rounded-md px-1 transition-colors",
           STATUS_STYLE[w.status],
+          single && w.status === "ok" && "bg-emerald-100/80 text-emerald-950 dark:bg-emerald-950/50 dark:text-emerald-200",
+          (w.status === "mispronounced" || w.status === "omitted") && "verdict-shake",
           selected === w.index && "ring-2 ring-foreground ring-offset-1",
         )}
       >
-        {text.slice(w.from, w.to)}
+        <span>{text.slice(w.from, w.to)}</span>
+        {single && w.status === "ok" && <Check className="verdict-pop size-5 text-emerald-600" />}
       </button>,
     );
     cursor = w.to;

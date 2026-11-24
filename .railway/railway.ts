@@ -9,7 +9,7 @@ export default defineRailway(() => {
     healthcheckTimeout: 300,
     deploy: { restartPolicyType: "ON_FAILURE", restartPolicyMaxRetries: 5 },
     volumeMounts: { "/data": sayclearVolume },
-    env: { AZURE_SPEECH_KEY: preserve(), AZURE_SPEECH_REGION: preserve(), BETTER_AUTH_SECRET: preserve(), BETTER_AUTH_URL: preserve(), CRON_SECRET: preserve(), ELEVENLABS_API_KEY: preserve(), NEXT_PUBLIC_SITE_URL: preserve(), OPENAI_API_KEY: preserve(), PORT: preserve(), STRIPE_PORTAL_CONFIGURATION: preserve(), STRIPE_SECRET_KEY: preserve(), STRIPE_WEBHOOK_SECRET: preserve() },
+    env: { AZURE_SPEECH_KEY: preserve(), AZURE_SPEECH_REGION: preserve(), BETTER_AUTH_SECRET: preserve(), BETTER_AUTH_URL: preserve(), CRON_SECRET: preserve(), ELEVENLABS_API_KEY: preserve(), GOOGLE_CLIENT_ID: preserve(), GOOGLE_CLIENT_SECRET: preserve(), NEXT_PUBLIC_SITE_URL: preserve(), OPENAI_API_KEY: preserve(), PORT: preserve(), STRIPE_PORTAL_CONFIGURATION: preserve(), STRIPE_SECRET_KEY: preserve(), STRIPE_WEBHOOK_SECRET: preserve() },
   });
   const remindersCron = service("reminders-cron", {
     // Daily reminder emails at 16:00 UTC over the private network; exits after the request.

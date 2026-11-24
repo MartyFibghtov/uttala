@@ -123,15 +123,19 @@ export function AccountProvider({ children }: { children: ReactNode }) {
         }
         return true;
       },
-      noteAnalysis: () => setMe((m) => (m ? { ...m, usage: { ...m.usage, used: m.usage.used + 1 } } : m)),
-      promptUpgrade: setUpgrade,
+      noteAnalysis: () =>
+        setMe((m) => (m && m.profile.onboarded ? { ...m, usage: { ...m.usage, used: m.usage.used + 1 } } : m)),
+      promptUpgrade: (reason) => {
+        if (!me.profile.onboarded) return;
+        setUpgrade(reason);
+      },
     };
   }, [me, load]);
 
   if (!value || needsOnboarding) {
     return (
       <div className="flex min-h-dvh flex-col items-center justify-center gap-4 p-6 text-center">
-        <Orb palette="orchid" size={56} float="fast" />
+        <Orb palette="orchid" size={56} agentState="thinking" />
         {failed ? (
           <>
             <p className="text-sm text-muted-foreground">We could not load your account. Check your connection.</p>
@@ -151,7 +155,7 @@ export function AccountProvider({ children }: { children: ReactNode }) {
   return (
     <AccountContext.Provider value={value}>
       {children}
-      <Dialog open={upgrade !== null} onOpenChange={(open) => !open && setUpgrade(null)}>
+      <Dialog open={upgrade !== null && value.me.profile.onboarded} onOpenChange={(open) => !open && setUpgrade(null)}>
         <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-3xl">
           {upgrade && (
             <>

@@ -1,7 +1,15 @@
 import { isLanguage, isLibraryText } from "@/lib/languages";
 import { isLevel } from "@/lib/levels";
 import { PLANS } from "@/lib/plans";
-import { consumeAnalysis, getAccess, getUser, refundAnalysis, unauthorized } from "@/lib/server/account";
+import {
+  consumeAnalysis,
+  consumeOnboardingAnalysis,
+  getAccess,
+  getUser,
+  refundAnalysis,
+  refundOnboardingAnalysis,
+  unauthorized,
+} from "@/lib/server/account";
 import { assess, demoResult, NoSpeechError } from "@/lib/server/assess";
 import { BodyTooLargeError, readBodyLimited } from "@/lib/server/body";
 import { awardPoints } from "@/lib/server/community";
@@ -60,6 +68,7 @@ export async function POST(request: Request) {
 
   const access = await getAccess(user.id);
   const { entitlements } = access;
+  const countsAgainstDaily = access.onboarded;
 
   const singleWord = tokenize(text, lang).length === 1;
   if (!entitlements.customText && !singleWord && !isLibraryText(lang, text) && !(await isGeneratedText(lang, text))) {
@@ -85,18 +94,26 @@ export async function POST(request: Request) {
       );
     }
   }
-  if (!(await consumeAnalysis(user.id, entitlements.dailyAnalyses))) {
+  if (countsAgainstDaily) {
+    if (!(await consumeAnalysis(user.id, entitlements.dailyAnalyses))) {
+      return Response.json(
+        {
+          error: `You have used all ${entitlements.dailyAnalyses} of today's recordings on the ${PLANS[access.plan].name} plan.`,
+          upgrade: "limit",
+        },
+        { status: 429, headers: { "Retry-After": String(secondsUntilUtcMidnight()) } },
+      );
+    }
+  } else if (!(await consumeOnboardingAnalysis(user.id))) {
     return Response.json(
-      {
-        error: `You have used all ${entitlements.dailyAnalyses} of today's recordings on the ${PLANS[access.plan].name} plan.`,
-        upgrade: "limit",
-      },
-      { status: 429, headers: { "Retry-After": String(secondsUntilUtcMidnight()) } },
+      { error: "Finish your quick setup to keep recording in the app." },
+      { status: 429 },
     );
   }
 
   // 16 kHz, 16-bit mono WAV with a 44-byte header.
   const duration = Math.max(0, (audio.size - 44) / 32000);
+  const refund = () => (countsAgainstDaily ? refundAnalysis(user.id) : refundOnboardingAnalysis(user.id));
 
   try {
     const result = hasElevenLabs()
@@ -107,11 +124,12 @@ export async function POST(request: Request) {
     return Response.json(result);
   } catch (err) {
     if (err instanceof NoSpeechError) {
-      await refundAnalysis(user.id);
+      console.warn("assess no-speech", { lang, words: tokenize(text, lang).length, duration: Math.round(duration * 10) / 10 });
+      await refund();
       return Response.json({ error: err.message, noSpeech: true }, { status: 422 });
     }
-    console.error("assess failed", err);
-    await refundAnalysis(user.id);
+    console.error("assess failed", { lang, duration: Math.round(duration * 10) / 10 }, err);
+    await refund();
     return Response.json(
       {
         error:

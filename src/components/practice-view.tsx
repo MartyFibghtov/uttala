@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Bookmark, BookmarkCheck, ChevronLeft, ChevronRight, Headphones, Library, Mic, Shuffle, Trash2 } from "lucide-react";
+import { ArrowRight, Bookmark, BookmarkCheck, ChevronLeft, ChevronRight, Headphones, Library, Mic, Shuffle, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/app-shell";
 import { ArtworkFrame } from "@/components/artwork";
@@ -28,7 +28,7 @@ import { cn } from "@/lib/utils";
 const INTRO = {
   beginner: "Short everyday phrases. Say the hard words on their own, then the whole phrase.",
   intermediate: "One short sentence at a time. Drill the hard words, then say the sentence and see what to fix.",
-  advanced: "Short, dense sentences and tongue twisters. Chase the last details that still sound foreign.",
+  advanced: "Natural, challenging spoken sentences. Chase the last details that still sound foreign.",
 };
 
 function TextRow({
@@ -105,7 +105,7 @@ function TextLibrary({ lang, onPick }: { lang: string; onPick: (text: string) =>
             {(["intermediate", "advanced"] as const).map((level) => (
               <section key={level} className="space-y-2">
                 <h3 className="text-xs font-medium text-muted-foreground">
-                  {level === "intermediate" ? "Everyday sentences" : "Tongue twisters and dense sentences"}
+                  {level === "intermediate" ? "Everyday sentences" : "Challenging spoken sentences"}
                 </h3>
                 {textsFor(lang, level).map((p) => (
                   <TextRow key={p.text} lang={lang} text={p.text} onPick={() => pick(p.text)} />
@@ -200,6 +200,7 @@ export function PracticeView() {
   const [texts, setTexts] = useState<Record<string, string>>({});
   const [steps, setSteps] = useState<Record<string, string | undefined>>({});
   const [queues, setQueues] = useState<Record<string, { raw: string; pieces: string[] }>>({});
+  const [pinnedLadders, setPinnedLadders] = useState<Record<string, string[]>>({});
   const [practiceMode, setPracticeMode] = useState<"read" | "shadow">("read");
   const [regenerating, setRegenerating] = useState(false);
   const key = `${lang}:${level}`;
@@ -208,11 +209,15 @@ export function PracticeView() {
   const queue = queues[key];
   const queueAt = queue ? queue.pieces.indexOf(text) : -1;
   const current = step ?? text;
+  const sentenceKey = `${lang}:${text.trim()}`;
   const setText = (value: string) => {
     setTexts((t) => ({ ...t, [key]: value }));
     setSteps((s) => ({ ...s, [key]: undefined }));
   };
-  const setStep = (value: string) => setSteps((s) => ({ ...s, [key]: value === text ? undefined : value }));
+  const setStep = (value: string) => {
+    setPinnedLadders((p) => (p[sentenceKey] ? p : { ...p, [sentenceKey]: words }));
+    setSteps((s) => ({ ...s, [key]: value === text ? undefined : value }));
+  };
   /** Pick something to practise. A longer text is split into short sentences, practised one at a time. */
   const choose = (value: string) => {
     const v = value.trim();
@@ -230,7 +235,11 @@ export function PracticeView() {
       ? { text: generatedItem.text, meaning: generatedItem.meaning, roman: generatedItem.roman }
       : undefined);
   const weakNorms = new Set(weakList.filter((w) => w.lang === lang).map((w) => w.key.slice(lang.length + 1)));
-  const words = isShort(text, lang) ? ladderWords(text, lang, { proposed: generatedItem?.words, weak: weakNorms }) : [];
+  const computedWords = isShort(text, lang) ? ladderWords(text, lang, { proposed: generatedItem?.words, weak: weakNorms }) : [];
+  const words = pinnedLadders[sentenceKey] ?? computedWords;
+  const ladderSteps = words.length ? [...words, text] : [text];
+  const ladderAt = ladderSteps.indexOf(current);
+  const nextLadderStep = ladderAt >= 0 && ladderAt < ladderSteps.length - 1 ? ladderSteps[ladderAt + 1] : null;
   const own = text.trim().length > 0 && !isLibraryText(lang, text);
   const ownText = queueAt >= 0 ? queue.raw : text.trim();
   const isSaved = saved.some((s) => s.lang === lang && s.text === ownText);
@@ -342,6 +351,22 @@ export function PracticeView() {
             voiceId={voiceId}
             onTextChange={setText}
             onEditDone={choose}
+            onRecordStart={() => {
+              setPinnedLadders((p) => (p[sentenceKey] ? p : { ...p, [sentenceKey]: words }));
+            }}
+            after={
+              nextLadderStep ? (
+                <Button variant="outline" className="rounded-full" onClick={() => setStep(nextLadderStep)}>
+                  {nextLadderStep === text ? "Now the sentence" : `Next word: “${nextLadderStep}”`}
+                  <ArrowRight />
+                </Button>
+              ) : (
+                <Button variant="outline" className="rounded-full" onClick={nextText}>
+                  Next sentence
+                  <ArrowRight />
+                </Button>
+              )
+            }
           />
         </>
       ) : (

@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { Logo } from "@/components/logo";
 import { ARTWORKS, ArtworkFrame, type ArtworkName } from "@/components/artwork";
-import { Orb } from "@/components/orb";
+import { Orb, OrbVisualizationShowcase } from "@/components/orb";
 import { Pricing } from "@/components/pricing";
 import { Button } from "@/components/ui/button";
 import { CONTENT, languageSlug } from "@/components/marketing-pages";
@@ -160,7 +160,7 @@ function ResultPreview() {
     bad: "bg-red-100 text-red-950 dark:bg-red-950/60 dark:text-red-200",
   };
   return (
-    <div className="relative w-full max-w-md rounded-2xl border bg-card/90 p-5 shadow-2xl ring-1 ring-black/5 backdrop-blur-md dark:ring-white/10" aria-hidden>
+    <div data-orb-card className="relative w-full max-w-md rounded-2xl border bg-card/90 p-5 shadow-2xl ring-1 ring-black/5 backdrop-blur-md dark:ring-white/10" aria-hidden>
       <p className="text-lg leading-loose">
         {words.map(([w, s], i) => (
           <span key={i}>
@@ -332,7 +332,7 @@ export function Landing() {
           </p>
           <div className="mt-8 grid gap-4 md:grid-cols-3">
             {LEVEL_IDS.map((id, i) => (
-              <div key={id} className="rounded-2xl border bg-card p-6">
+              <div key={id} data-orb-card className="rounded-2xl border bg-card p-6 transition-colors hover:border-foreground/25">
                 <Orb palette={(["sky", "gold", "orchid"] as const)[i]} size={36} />
                 <h3 className="mt-4 text-lg font-semibold">{LEVELS[id].name}</h3>
                 <p className="mt-0.5 text-sm font-medium">“{LEVELS[id].headline}”</p>
@@ -429,10 +429,10 @@ export function Landing() {
 
       <section className="aurora-wash relative overflow-hidden border-t">
         <div className="mx-auto flex max-w-6xl flex-col items-center px-4 py-16 text-center md:px-8 md:py-20">
-          <div className="flex items-end gap-3" aria-hidden>
-            <Orb palette="sky" size={36} float="slow" />
-            <Orb palette="orchid" size={56} float="fast" />
-            <Orb palette="gold" size={40} float="slow" />
+          <div data-orb-card className="flex items-end gap-5 py-4" aria-hidden>
+            <Orb palette="sky" size={48} float="slow" phaseOffset={0} />
+            <Orb palette="orchid" size={72} float="fast" phaseOffset={1.6} />
+            <Orb palette="gold" size={52} float="slow" phaseOffset={3.1} />
           </div>
           <h2 className="mt-6 text-3xl font-semibold tracking-tight">Hear the difference today</h2>
           <p className="mt-2 max-w-md text-muted-foreground">Your first feedback takes about two minutes.</p>
@@ -442,6 +442,7 @@ export function Landing() {
               <ArrowRight />
             </Link>
           </Button>
+          <OrbVisualizationShowcase />
         </div>
       </section>
     </>

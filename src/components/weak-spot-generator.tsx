@@ -175,7 +175,7 @@ export async function requestGeneratedText(opts: GenerateRequestOptions): Promis
 
 /** Build the default weak-spot payload from the learner's profile for one-click generation. */
 export function defaultGeneratePayload(lang: string, level: LevelId, profile: WeakProfile): GenerateRequestOptions {
-  const targetWords = (profile.dueWords.length ? profile.dueWords : profile.weakWords).slice(0, 5).map((w) => ({
+  const targetWords = (profile.dueWords.length ? profile.dueWords : profile.weakWords).slice(0, 3).map((w) => ({
     text: w.text,
     heard: w.heard,
     avg: w.avg,
@@ -245,7 +245,7 @@ export function WeakSpotGenerator({
 
   // Default selections reflect the learner's tracked weak spots when they haven't customised yet.
   const defaultWordKeys = useMemo(
-    () => (profile.dueWords.length ? profile.dueWords : profile.weakWords).slice(0, 5).map((w) => w.text),
+    () => (profile.dueWords.length ? profile.dueWords : profile.weakWords).slice(0, 3).map((w) => w.text),
     [profile.dueWords, profile.weakWords],
   );
   const defaultSoundIpas = useMemo(() => {
@@ -402,8 +402,8 @@ export function WeakSpotGenerator({
             <DialogTitle>Generate for your {language.name} weak spots</DialogTitle>
             <DialogDescription>
               {profile.hasTrackedWeakSpots
-                ? "Your weakest words, sounds and ear contrasts are pre-selected below. Adjust them or add a topic, and we will write one short sentence and a few drill words around them."
-                : `Pick the ${language.name} sounds, contrasts or words you want to work on, and we will write one short sentence and a few drill words that pack them in.`}
+                ? "Your weakest words, sounds and ear contrasts are pre-selected below as sound clues. Adjust them or add a topic, and we will write one natural everyday sentence targeting those same sounds."
+                : `Pick the ${language.name} sounds, contrasts or words you want to work on, and we will write one natural everyday sentence and a few drill words targeting those sounds.`}
             </DialogDescription>
           </DialogHeader>
 
@@ -411,7 +411,7 @@ export function WeakSpotGenerator({
             {profile.weakWords.length > 0 && (
               <fieldset className="space-y-2">
                 <legend className="text-xs font-medium text-muted-foreground">
-                  Weak words from your recordings ({activeWords.length} selected)
+                  Weak words — used to target their sounds ({activeWords.length} selected)
                 </legend>
                 <div className="flex flex-wrap gap-1.5">
                   {profile.weakWords.slice(0, 12).map((w) => {
@@ -449,7 +449,7 @@ export function WeakSpotGenerator({
             {selectableSounds.length > 0 && (
               <fieldset className="space-y-2">
                 <legend className="text-xs font-medium text-muted-foreground">
-                  Sounds & phonemes to pack into the sentence ({activeSounds.length} selected)
+                  Sounds &amp; phonemes to target ({activeSounds.length} selected)
                 </legend>
                 <div className="flex flex-wrap gap-1.5">
                   {selectableSounds.map((s) => {

@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { ARTWORKS, ArtworkFrame } from "@/components/artwork";
-import { Orb } from "@/components/orb";
+import { Orb, OrbVisualizationShowcase } from "@/components/orb";
 import { Button } from "@/components/ui/button";
 import { LANGUAGES, unitsFor, type Language } from "@/lib/languages";
 import { MINIMAL_PAIRS } from "@/lib/minimal-pairs";
@@ -71,10 +71,10 @@ export function StartCta({ title = "Hear the difference today", body = "Your fir
   return (
     <section className="aurora-wash relative overflow-hidden border-t">
       <div className="mx-auto flex max-w-6xl flex-col items-center px-4 py-16 text-center md:px-8 md:py-20">
-        <div className="flex items-end gap-3" aria-hidden>
-          <Orb palette="sky" size={36} float="slow" />
-          <Orb palette="orchid" size={56} float="fast" />
-          <Orb palette="gold" size={40} float="slow" />
+        <div data-orb-card className="flex items-end gap-5 py-4" aria-hidden>
+          <Orb palette="sky" size={48} float="slow" phaseOffset={0} />
+          <Orb palette="orchid" size={72} float="fast" phaseOffset={1.6} />
+          <Orb palette="gold" size={52} float="slow" phaseOffset={3.1} />
         </div>
         <h2 className="mt-6 text-3xl font-semibold tracking-tight">{title}</h2>
         <p className="mt-2 max-w-md text-muted-foreground">{body}</p>
@@ -85,6 +85,7 @@ export function StartCta({ title = "Hear the difference today", body = "Your fir
           </Link>
         </Button>
         <p className="mt-3 text-sm text-muted-foreground">Free plan, no card needed.</p>
+        <OrbVisualizationShowcase />
       </div>
     </section>
   );

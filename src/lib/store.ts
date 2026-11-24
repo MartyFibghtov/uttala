@@ -31,6 +31,15 @@ export interface Settings {
   soundCheck?: boolean;
 }
 
+export interface LeftOutWord {
+  lang: string;
+  text: string;
+  avg?: number;
+  context?: string;
+  heard?: string;
+  at?: number;
+}
+
 interface Shape {
   attempts: Attempt[];
   weak: WeakWord[];
@@ -50,7 +59,7 @@ interface Shape {
   /** Achievements the learner has already been told about. */
   badges: string[];
   /** Weak words that did not fit the free drill list (this browser only). */
-  leftOut: { lang: string; text: string }[];
+  leftOut: LeftOutWord[];
 }
 
 const defaults: Shape = {
@@ -225,6 +234,77 @@ export function removeWeak(key: string) {
   write("weak", read("weak").filter((w) => w.key !== key));
 }
 
+/** Restore a removed drill word back to the active drill list (e.g. via Undo). */
+export function restoreWeakWord(word: WeakWord) {
+  const all = read("weak");
+  if (all.some((w) => w.key === word.key)) return;
+  write("weak", [...all, word]);
+  write(
+    "leftOut",
+    read("leftOut").filter((w) => !(w.lang === word.lang && normalize(w.text, w.lang) === normalize(word.text, word.lang))),
+  );
+}
+
+/**
+ * Move a word from the waiting list (`leftOut`) into the active drill list.
+ * When `swapOutKey` is given (e.g. when the 5-word limit is full), the swapped-out word
+ * moves into `leftOut` rather than disappearing.
+ */
+export function promoteLeftOutWord(lang: string, text: string, swapOutKey?: string): WeakWord | null {
+  const norm = normalize(text, lang);
+  if (!norm) return null;
+  const key = `${lang}:${norm}`;
+  const allWeak = read("weak");
+  const existing = allWeak.find((w) => w.key === key);
+  if (existing) return existing;
+
+  const allLeftOut = read("leftOut");
+  const entry = allLeftOut.find((w) => w.lang === lang && normalize(w.text, lang) === norm);
+  const score = entry?.avg ?? 62;
+  const now = Date.now();
+  const promoted: WeakWord = {
+    key,
+    lang,
+    text: entry?.text ?? text,
+    context: entry?.context ?? (entry?.text ?? text),
+    attempts: 1,
+    avg: score,
+    last: score,
+    streak: 0,
+    heard: entry?.heard,
+    at: now,
+  };
+
+  let swappedOut: WeakWord | undefined;
+  let nextWeak: WeakWord[];
+  if (swapOutKey && allWeak.some((w) => w.key === swapOutKey)) {
+    swappedOut = allWeak.find((w) => w.key === swapOutKey);
+    nextWeak = allWeak.map((w) => (w.key === swapOutKey ? promoted : w));
+  } else {
+    nextWeak = [...allWeak, promoted];
+  }
+  write("weak", nextWeak);
+
+  const remainingLeftOut = allLeftOut.filter((w) => !(w.lang === lang && normalize(w.text, lang) === norm));
+  if (swappedOut) {
+    remainingLeftOut.unshift({
+      lang: swappedOut.lang,
+      text: swappedOut.text,
+      avg: swappedOut.avg,
+      context: swappedOut.context,
+      heard: swappedOut.heard,
+      at: now,
+    });
+  }
+  write("leftOut", remainingLeftOut.slice(0, 30));
+  return promoted;
+}
+
+export function dismissLeftOutWord(lang: string, text: string) {
+  const norm = normalize(text, lang);
+  write("leftOut", read("leftOut").filter((w) => !(w.lang === lang && normalize(w.text, lang) === norm)));
+}
+
 export function setSettings(patch: Partial<Settings>) {
   write("settings", { ...read("settings"), ...patch });
 }
@@ -313,14 +393,41 @@ export const isDue = (w: WeakWord, now = Date.now()) => w.reviews === undefined 
 
 // --- Recording an attempt ---------------------------------------------------
 
+export interface DrillWordTransition {
+  key: string;
+  text: string;
+  score: number;
+  heard?: string;
+  prevStreak: number;
+  newStreak: number;
+  status:
+    | "added"
+    | "streak-up"
+    | "streak-reset"
+    | "resting"
+    | "resting-early"
+    | "mastered"
+    | "capped";
+  /** When status is "resting" or "resting-early", how many days until the next check. */
+  dueDays?: number;
+  /** 1-based spaced check index (1 = 2-day check, 2 = 7-day check). */
+  checkIndex?: number;
+  /** Snapshot of the drill word right after this attempt (even if it was just mastered). */
+  word: WeakWord;
+}
+
 export interface Recorded {
   attempt: Attempt;
   /** Words that passed their last spaced check with this recording. */
   mastered: string[];
   /** True when this beat the previous best score for the text. */
   personalBest: boolean;
+  /** Previous best score for this text, when one existed before this attempt. */
+  previousBest?: number;
   /** Unclear words from this take that did not fit the drill list on the learner's plan. */
   leftOut: string[];
+  /** Per-word drill transitions produced by this attempt. */
+  transitions: DrillWordTransition[];
 }
 
 /** Save an attempt, award points and update the list of things worth drilling. */
@@ -343,15 +450,21 @@ export function recordAttempt(
 
   const clear = SCORE_SCALE.clear;
   const all = read("weak");
-  const weak = new Map(all.filter((w) => w.lang === lang).map((w) => [w.key, w]));
+  const existingForLang = all.filter((w) => w.lang === lang);
+  const existingKeys = new Set(existingForLang.map((w) => w.key));
+  const updatedExisting = new Map(existingForLang.map((w) => [w.key, w]));
+  const newCandidates = new Map<string, WeakWord>();
+  const transitions: DrillWordTransition[] = [];
+
   for (const w of result.words) {
     const norm = normalize(w.text, lang);
     if (Array.from(norm).length < 2 && !/[^\u0000-ɏ]/.test(norm)) continue; // skip "a", "I"
     const key = `${lang}:${norm}`;
-    const prev = weak.get(key);
+    const wasExisting = existingKeys.has(key);
+    const prev = updatedExisting.get(key) ?? newCandidates.get(key);
     if (w.score < clear) {
       // Unclear again: back to learning, whatever stage it had reached.
-      weak.set(key, {
+      const updatedWord: WeakWord = {
         key,
         lang,
         text: w.text,
@@ -362,9 +475,25 @@ export function recordAttempt(
         streak: 0,
         heard: w.heard ?? prev?.heard,
         at: now,
-      });
-    } else if (prev) {
-      const base = {
+      };
+      if (wasExisting) {
+        const prevStreak = prev?.reviews !== undefined ? MASTERED_STREAK : (prev?.streak ?? 0);
+        updatedExisting.set(key, updatedWord);
+        transitions.push({
+          key,
+          text: w.text,
+          score: w.score,
+          heard: w.heard,
+          prevStreak,
+          newStreak: 0,
+          status: "streak-reset",
+          word: updatedWord,
+        });
+      } else {
+        newCandidates.set(key, updatedWord);
+      }
+    } else if (wasExisting && prev) {
+      const base: WeakWord = {
         ...prev,
         attempts: prev.attempts + 1,
         avg: Math.round(prev.avg * 0.6 + w.score * 0.4),
@@ -373,26 +502,133 @@ export function recordAttempt(
       };
       if (prev.reviews === undefined) {
         const streak = prev.streak + 1;
-        weak.set(key, streak >= MASTERED_STREAK ? { ...base, streak, reviews: 0, due: now + REVIEW_GAPS[0] } : { ...base, streak });
+        const updatedWord: WeakWord =
+          streak >= MASTERED_STREAK ? { ...base, streak, reviews: 0, due: now + REVIEW_GAPS[0] } : { ...base, streak };
+        updatedExisting.set(key, updatedWord);
+        if (streak >= MASTERED_STREAK) {
+          transitions.push({
+            key,
+            text: prev.text,
+            score: w.score,
+            prevStreak: prev.streak,
+            newStreak: streak,
+            status: "resting",
+            dueDays: Math.round(REVIEW_GAPS[0] / DAY_MS),
+            checkIndex: 1,
+            word: updatedWord,
+          });
+        } else {
+          transitions.push({
+            key,
+            text: prev.text,
+            score: w.score,
+            prevStreak: prev.streak,
+            newStreak: streak,
+            status: "streak-up",
+            word: updatedWord,
+          });
+        }
       } else if ((prev.due ?? 0) > now) {
-        weak.set(key, base); // said clearly before the check was due: nice, but the schedule stands
+        updatedExisting.set(key, base); // said clearly before the check was due: nice, but the schedule stands
+        transitions.push({
+          key,
+          text: prev.text,
+          score: w.score,
+          prevStreak: MASTERED_STREAK,
+          newStreak: MASTERED_STREAK,
+          status: "resting-early",
+          dueDays: Math.max(1, Math.ceil(((prev.due ?? 0) - now) / DAY_MS)),
+          checkIndex: prev.reviews + 1,
+          word: base,
+        });
       } else if (prev.reviews + 1 >= REVIEW_GAPS.length) {
-        weak.delete(key);
+        updatedExisting.delete(key);
         mastered.push({ key, lang, text: prev.text, at: now });
+        transitions.push({
+          key,
+          text: prev.text,
+          score: w.score,
+          prevStreak: MASTERED_STREAK,
+          newStreak: MASTERED_STREAK,
+          status: "mastered",
+          checkIndex: REVIEW_GAPS.length,
+          word: { ...base, streak: MASTERED_STREAK, reviews: REVIEW_GAPS.length },
+        });
       } else {
-        weak.set(key, { ...base, reviews: prev.reviews + 1, due: now + REVIEW_GAPS[prev.reviews + 1] });
+        const nextReviews = prev.reviews + 1;
+        const nextGap = REVIEW_GAPS[nextReviews];
+        const updatedWord: WeakWord = { ...base, reviews: nextReviews, due: now + nextGap };
+        updatedExisting.set(key, updatedWord);
+        transitions.push({
+          key,
+          text: prev.text,
+          score: w.score,
+          prevStreak: MASTERED_STREAK,
+          newStreak: MASTERED_STREAK,
+          status: "resting",
+          dueDays: Math.round(nextGap / DAY_MS),
+          checkIndex: nextReviews + 1,
+          word: updatedWord,
+        });
       }
     }
   }
-  // Weakest first; a plan with a capped drill list keeps only the weakest few per language.
-  const ranked = [...weak.values()].sort((a, b) => a.avg - b.avg);
-  const kept = ranked.slice(0, opts.maxDrillWords ?? 200);
+
+  // Keep existing drill words in their stable slots so words never silently disappear or jump order mid-drill.
+  // Only open slots up to maxDrillWords are filled by newly discovered weak words (weakest first).
+  const cap = opts.maxDrillWords ?? 200;
+  const existingKept = [...updatedExisting.values()].slice(0, cap);
+  const openSlots = Math.max(0, cap - existingKept.length);
+  const rankedNew = [...newCandidates.values()].sort((a, b) => a.avg - b.avg);
+  const addedNew = rankedNew.slice(0, openSlots);
+  const droppedNew = rankedNew.slice(openSlots);
+
+  for (const w of addedNew) {
+    transitions.push({
+      key: w.key,
+      text: w.text,
+      score: w.last,
+      heard: w.heard,
+      prevStreak: 0,
+      newStreak: 0,
+      status: "added",
+      word: w,
+    });
+  }
+  for (const w of droppedNew) {
+    transitions.push({
+      key: w.key,
+      text: w.text,
+      score: w.last,
+      heard: w.heard,
+      prevStreak: 0,
+      newStreak: 0,
+      status: "capped",
+      word: w,
+    });
+  }
+
+  const kept = [...existingKept, ...addedNew];
   write("weak", [...all.filter((w) => w.lang !== lang), ...kept]);
-  // Remember which unclear words did not fit, so the learner can see what a longer list would hold.
-  const dropped = ranked.slice(kept.length).map((w) => ({ lang, text: w.text }));
-  const keptTexts = new Set(kept.map((w) => w.text));
-  const leftOut = [...dropped, ...read("leftOut").filter((w) => !(w.lang === lang && keptTexts.has(w.text)))]
-    .filter((w, i, all2) => all2.findIndex((x) => x.lang === w.lang && x.text === w.text) === i)
+
+  // Remember which unclear words did not fit, so the learner can see what is waiting for a free slot.
+  const dropped: LeftOutWord[] = droppedNew.map((w) => ({
+    lang,
+    text: w.text,
+    avg: w.avg,
+    context: w.context,
+    heard: w.heard,
+    at: now,
+  }));
+  const keptNorms = new Set(kept.map((w) => normalize(w.text, lang)));
+  const masteredNorms = new Set(mastered.map((w) => normalize(w.text, lang)));
+  const leftOut = [
+    ...dropped,
+    ...read("leftOut").filter(
+      (w) => !(w.lang === lang && (keptNorms.has(normalize(w.text, lang)) || masteredNorms.has(normalize(w.text, lang)))),
+    ),
+  ]
+    .filter((w, i, all2) => all2.findIndex((x) => x.lang === w.lang && normalize(x.text, w.lang) === normalize(w.text, w.lang)) === i)
     .slice(0, 30);
   if (JSON.stringify(leftOut) !== JSON.stringify(read("leftOut"))) write("leftOut", leftOut);
   if (mastered.length) write("mastered", [...mastered, ...read("mastered")].slice(0, 500));
@@ -442,7 +678,14 @@ export function recordAttempt(
     }
     write("phonemes", [...phonemes.values()]);
   }
-  return { attempt, mastered: mastered.map((w) => w.text), personalBest, leftOut: dropped.map((w) => w.text) };
+  return {
+    attempt,
+    mastered: mastered.map((w) => w.text),
+    personalBest,
+    previousBest,
+    leftOut: dropped.map((w) => w.text),
+    transitions,
+  };
 }
 
 

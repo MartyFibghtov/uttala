@@ -113,7 +113,20 @@ export function SoundsView() {
 
 function pairsFor(sound: Sound) {
   const parts = sound.symbol.split(" ").map((p) => p.replace("ː", ""));
-  return (MINIMAL_PAIRS[sound.lang] ?? []).filter((p) => parts.some((part) => part.length > 0 && p.contrast.includes(part)));
+  const keywords: string[] = [];
+  if (sound.symbol.includes("ː")) keywords.push("long", "short");
+  if (sound.symbol === "tt" || sound.symbol === "っ") keywords.push("double");
+  if (sound.symbol.includes("ʲ")) keywords.push("soft");
+  if (sound.symbol.includes("˥") && sound.lang === "zh") keywords.push("tone");
+  if (sound.symbol.normalize("NFD").includes("\u0303")) keywords.push("nasal");
+  if (sound.symbol.includes("ʰ") || sound.symbol.includes("ʱ")) keywords.push("aspirated", "breathy");
+  return (MINIMAL_PAIRS[sound.lang] ?? []).filter((p) => {
+    const lower = p.contrast.toLowerCase();
+    return (
+      parts.some((part) => part.length > 0 && p.contrast.includes(part)) ||
+      keywords.some((kw) => lower.includes(kw))
+    );
+  });
 }
 
 export function SoundDetail({ id }: { id: string }) {
@@ -248,7 +261,7 @@ export function SoundDetail({ id }: { id: string }) {
       </div>
 
       <h2 className="mt-8 text-lg font-semibold tracking-tight">Practise it in words and sentences</h2>
-      <p className="mt-1 text-sm text-muted-foreground">Pick a word, or generate a fresh sentence packed with /{sound.symbol}/.</p>
+      <p className="mt-1 text-sm text-muted-foreground">Pick a word, or generate a natural sentence targeting /{sound.symbol}/.</p>
       <div className="mt-3 mb-4 flex flex-wrap gap-2">
         {sound.words.map((w) => {
           const score = best[bestKey(lang, w)];

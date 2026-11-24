@@ -34,7 +34,7 @@ export const LEVELS: Record<LevelId, Level> = {
     name: "Sounding native",
     headline: "I'm fluent and want to lose the last traces of accent",
     description:
-      "Short, dense sentences and tongue twisters that stack the hardest sounds: the details that still give an accent away.",
+      "Natural, challenging spoken sentences with the trickiest sounds, clusters and cadence: the details that still give an accent away.",
     slowByDefault: false,
   },
 };

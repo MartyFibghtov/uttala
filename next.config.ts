@@ -11,6 +11,10 @@ const csp = [
 const nextConfig: NextConfig = {
   // Self-contained server (.next/standalone) for the Docker image.
   output: "standalone",
+  images: {
+    formats: ["image/avif", "image/webp"],
+    qualities: [75, 90, 95],
+  },
   // Native database driver: load it from node_modules instead of bundling it.
   serverExternalPackages: ["@libsql/client", "libsql", "@huggingface/transformers", "onnxruntime-node"],
   // Never ship the local development database or model cache. Native binaries (and the shared libraries

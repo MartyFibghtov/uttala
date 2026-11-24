@@ -39,22 +39,36 @@ export function WordLadder({
         const isSentence = i === steps.length - 1;
         const score = best[bestKey(lang, step)];
         const clear = score !== undefined && score >= SCORE_SCALE.clear;
+        const tried = score !== undefined && !clear;
+        const active = step === current;
         return (
           <button
             key={`${i}:${step}`}
             type="button"
             lang={isSentence ? undefined : lang}
-            aria-pressed={step === current}
+            aria-pressed={active}
             onClick={() => onPick(step)}
             className={cn(
-              "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-secondary",
-              step === current && "border-foreground bg-secondary",
+              "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-secondary",
+              clear &&
+                !active &&
+                "border-emerald-500/40 bg-emerald-50/60 text-emerald-950 dark:border-emerald-800/60 dark:bg-emerald-950/30 dark:text-emerald-100",
+              tried &&
+                !active &&
+                "border-amber-400/50 bg-amber-50/40 dark:border-amber-800/60 dark:bg-amber-950/20",
+              active && "border-foreground bg-secondary ring-1 ring-foreground/20",
               isSentence && "ml-1",
             )}
           >
-            {clear && <Check className="size-3 text-emerald-600" />}
-            {isSentence ? "Whole sentence" : step}
-            {score !== undefined && !clear && <span className={cn("tabular-nums", scoreColor(score))}>{score}</span>}
+            {clear ? (
+              <Check className="verdict-pop size-3 text-emerald-600" />
+            ) : (
+              <span className="font-mono text-[10px] text-muted-foreground">{i + 1}.</span>
+            )}
+            <span>{isSentence ? "Whole sentence" : step}</span>
+            {score !== undefined && (
+              <span className={cn("tabular-nums font-semibold", scoreColor(score))}>{score}</span>
+            )}
           </button>
         );
       })}
