@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import { createClient, type Client, type InValue } from "@libsql/client";
 
 let client: Client | undefined;
@@ -8,13 +9,29 @@ let client: Client | undefined;
  * database (e.g. Turso) when DATABASE_URL or TURSO_DATABASE_URL is set.
  */
 export function dbConfig() {
-  const defaultFile = process.env.VERCEL
-    ? "file:/tmp/sayclear.db"
-    : existsSync(".data/uttala.db") && !existsSync(".data/sayclear.db")
-      ? "file:.data/uttala.db"
-      : "file:.data/sayclear.db";
+  // A persistent volume (Railway sets RAILWAY_VOLUME_MOUNT_PATH, or set DATA_DIR yourself) holds the database file.
+  const dataDir = process.env.DATA_DIR?.trim() || process.env.RAILWAY_VOLUME_MOUNT_PATH?.trim();
+  const defaultFile = dataDir
+    ? `file:${dataDir.replace(/\/+$/, "")}/sayclear.db`
+    : process.env.VERCEL
+      ? "file:/tmp/sayclear.db"
+      : existsSync(".data/uttala.db") && !existsSync(".data/sayclear.db")
+        ? "file:.data/uttala.db"
+        : "file:.data/sayclear.db";
+  if (
+    process.env.NODE_ENV === "production" &&
+    process.env.NEXT_PHASE !== "phase-production-build" &&
+    !process.env.DATABASE_URL?.trim() &&
+    !process.env.TURSO_DATABASE_URL?.trim() &&
+    !dataDir
+  ) {
+    console.error(
+      "[db] No DATABASE_URL/TURSO_DATABASE_URL and no volume (RAILWAY_VOLUME_MOUNT_PATH or DATA_DIR) in production. The database would live on ephemeral disk and be lost on every deploy. Mount a persistent volume at /data and set DATA_DIR=/data.",
+    );
+  }
   const url = process.env.DATABASE_URL?.trim() || process.env.TURSO_DATABASE_URL?.trim() || defaultFile;
   if (url.startsWith("file:.data/")) mkdirSync(".data", { recursive: true });
+  else if (url.startsWith("file:/")) mkdirSync(dirname(url.slice("file:".length)), { recursive: true });
   const authToken = process.env.DATABASE_AUTH_TOKEN?.trim() || process.env.TURSO_AUTH_TOKEN?.trim();
   return { url, authToken };
 }

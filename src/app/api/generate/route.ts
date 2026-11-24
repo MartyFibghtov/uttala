@@ -1,5 +1,6 @@
 import { isLanguage } from "@/lib/languages";
 import { isLevel } from "@/lib/levels";
+import { first } from "@/lib/server/db";
 import { getAccess, getUser, unauthorized } from "@/lib/server/account";
 import {
   generatePracticeText,
@@ -49,6 +50,27 @@ export async function POST(request: Request) {
 
   const access = await getAccess(user.id);
   const level = isLevel(body?.level) ? body.level : access.level;
+
+  // Free text focus lets the learner steer what is generated, which is the same thing as bringing their own text.
+  if (typeof body?.customFocus === "string" && body.customFocus.trim() && !access.entitlements.customText) {
+    return Response.json(
+      { error: "Steering a practice sentence with your own focus is part of Plus.", upgrade: "customText" },
+      { status: 403 },
+    );
+  }
+  // Generation calls a paid model, so each account gets a generous daily allowance.
+  const since = Date.now() - 24 * 3600 * 1000;
+  const made = await first<{ n: number }>(
+    "SELECT COUNT(*) AS n FROM generated_text WHERE user_id = ? AND created_at > ?",
+    [user.id, since],
+  );
+  const dailyLimit = access.entitlements.customText ? 100 : 30;
+  if ((made?.n ?? 0) >= dailyLimit) {
+    return Response.json(
+      { error: "You have made plenty of tailored sentences today. More will be available tomorrow." },
+      { status: 429 },
+    );
+  }
 
   const words = Array.isArray(body?.words)
     ? body.words

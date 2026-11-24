@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { AudioWaveform, BookOpen, ChartLine, ChevronsUpDown, Flame, Headphones, House, LogOut, Mic, Settings, Target, Users } from "lucide-react";
 import { useEffect, type ReactNode } from "react";
 import { toast } from "sonner";
+import { Logo } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -16,12 +17,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Progress } from "@/components/ui/progress";
 import { useAccount } from "@/hooks/use-account";
-import { authClient } from "@/lib/auth-client";
+import { authClient, navigate } from "@/lib/auth-client";
 import { ACHIEVEMENTS, isUnlocked } from "@/lib/gamification";
 import { PLANS } from "@/lib/plans";
 import { useOverview } from "@/lib/stats";
 import { isDue, markBadgesSeen, useStore } from "@/lib/store";
-import { SITE } from "@/lib/site";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -63,7 +63,7 @@ function StreakCard() {
     <Link href="/progress" className="block space-y-2 rounded-xl border bg-background p-3 transition-colors hover:bg-sidebar-accent">
       <div className="flex items-center justify-between gap-2 text-xs whitespace-nowrap">
         <span className="flex items-center gap-1.5 font-medium">
-          <Flame className={cn("size-3.5", o.streak > 0 ? "text-orange-500" : "text-muted-foreground")} />
+          <Flame className={cn("size-3.5", o.streak > 0 ? "text-brand" : "text-muted-foreground")} />
           {o.streak}-day streak
         </span>
         <span className="tabular-nums text-muted-foreground">
@@ -78,22 +78,13 @@ function StreakCard() {
   );
 }
 
-export function Logo({ href = "/" }: { href?: string }) {
-  return (
-    <Link href={href} className="flex items-center gap-2 font-semibold tracking-tight">
-      <span className="flex h-6 items-center gap-[3px]" aria-hidden>
-        {[10, 18, 24, 14].map((h, i) => (
-          <span key={i} className="w-[3px] rounded-full bg-foreground" style={{ height: h }} />
-        ))}
-      </span>
-      {SITE.name}
-    </Link>
-  );
-}
-
 async function signOut() {
-  await authClient.signOut();
-  window.location.assign("/");
+  try {
+    await authClient.signOut();
+  } catch {
+    // Leave anyway; the server session expires on its own.
+  }
+  navigate("/");
 }
 
 /** Today's allowance, with the upgrade path for people on the free plan. */
@@ -104,14 +95,16 @@ function UsageCard() {
   return (
     <div className="space-y-2.5 rounded-xl border bg-background p-3">
       <div className="flex items-baseline justify-between gap-2 text-xs whitespace-nowrap">
-        <span className="font-medium">{me.billing ? `${PLANS[me.plan].name} plan` : "Recordings"}</span>
+        <span className={cn("font-medium", me.billing && me.plan !== "free" && "premium-text")}>
+          {me.billing ? `${PLANS[me.plan].name} plan` : "Recordings"}
+        </span>
         <span className="tabular-nums text-muted-foreground">
           {left} left today
         </span>
       </div>
       <Progress value={(left / me.usage.limit) * 100} className="h-1.5" aria-label="Recordings left today" />
       {free && (
-        <Button size="sm" className="w-full rounded-full" onClick={() => promptUpgrade(left ? "prosody" : "limit")}>
+        <Button size="sm" variant="outline" className="w-full rounded-full" onClick={() => promptUpgrade(left ? "prosody" : "limit")}>
           {me.trialAvailable ? "Try Plus free" : "Upgrade"}
         </Button>
       )}
@@ -181,7 +174,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   if (pathname === "/onboarding") {
     return (
       <div className="min-h-dvh">
-        <div className="aurora-line" />
         {children}
       </div>
     );
@@ -230,7 +222,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             className="flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium tabular-nums"
             aria-label={`${overview.streak}-day streak`}
           >
-            <Flame className={cn("size-3.5", overview.streak > 0 ? "text-orange-500" : "text-muted-foreground")} />
+            <Flame className={cn("size-3.5", overview.streak > 0 ? "text-brand" : "text-muted-foreground")} />
             {overview.streak}
           </Link>
           <Link
@@ -252,7 +244,6 @@ export function AppShell({ children }: { children: ReactNode }) {
       </header>
 
       <main className="min-w-0 flex-1 pb-20 md:pb-0">
-        <div className="aurora-line" />
         <div className="mx-auto w-full max-w-6xl px-4 py-6 md:px-8 md:py-8">{children}</div>
       </main>
 
@@ -273,7 +264,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <Icon className="size-5" />
             {label}
             {href === "/drills" && due > 0 && (
-              <span className="absolute top-1.5 left-1/2 ml-2 size-2 rounded-full bg-orange-500" aria-label={`${due} due`} />
+              <span className="absolute top-1.5 left-1/2 ml-2 size-2 rounded-full bg-brand" aria-label={`${due} due`} />
             )}
           </Link>
         ))}

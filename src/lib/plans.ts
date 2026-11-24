@@ -10,7 +10,7 @@ export interface Entitlements {
   voiceChoice: boolean;
   /** Rhythm and melody comparison against the reference voice. */
   prosody: boolean;
-  /** Sound-by-sound scores. */
+  /** Server-measured sound-by-sound scores (English only; other languages are scored per word by the server). */
   phonemes: boolean;
   /** How many weak words the drill list keeps; null = no cap. */
   maxDrillWords: number | null;
@@ -80,8 +80,8 @@ export const PLANS: Record<PlanId, Plan> = {
     price: { month: 1999, year: 14999 },
     features: [
       "Everything in Plus",
-      "Sound-by-sound scoring in 15 languages",
-      "Your weakest sounds tracked over time",
+      "Sound-by-sound scores from our servers for English, and your weakest sounds tracked over time",
+      "Other languages: the precise sound check, run on our server, is free on every plan; Pro does not add per-sound numbers there",
       "250 recordings analysed every day",
       "Priority support",
     ],
@@ -116,3 +116,9 @@ export const perMonth = (plan: Plan, interval: Interval) =>
 
 export const yearlySaving = (plan: Plan) =>
   plan.price.month ? Math.round((1 - plan.price.year / (plan.price.month * 12)) * 100) : 0;
+
+/** When today's allowance resets (midnight UTC) written in the viewer's own time zone, e.g. "1:00 AM". */
+export function resetTimeLabel(now = new Date()): string {
+  const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
+  return next.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}

@@ -8,12 +8,14 @@ import { Ring, Stars, WeekStrip } from "@/components/charts";
 import { rankForScore } from "@/components/diagnostic-lesson";
 import { Orb } from "@/components/orb";
 import { LanguagePicker } from "@/components/pickers";
+import { UpgradeCard, useNudge } from "@/components/pricing";
 import { scoreColor } from "@/components/practice-session";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { useAccount } from "@/hooks/use-account";
 import { getLanguage } from "@/lib/languages";
+import { PLANS, resetTimeLabel } from "@/lib/plans";
 import { MINIMAL_PAIRS } from "@/lib/minimal-pairs";
 import { soundsFor } from "@/lib/sounds";
 import { courseProgress, useOverview } from "@/lib/stats";
@@ -87,6 +89,9 @@ export function HomeView() {
   // A different sound each day, the same one all day.
   const featured = sounds.length ? sounds[dayNumber() % sounds.length] : null;
 
+  const outOfRecordings = me.usage.used >= me.usage.limit;
+  const nudge = useNudge("limit", outOfRecordings && me.billing && me.plan === "free");
+
   const tasks: Task[] = [
     due.length
       ? {
@@ -135,9 +140,13 @@ export function HomeView() {
     {
       icon: Mic,
       title: "Say a short sentence",
-      detail: o.today.attempts ? `${o.today.attempts} recording${o.today.attempts === 1 ? "" : "s"} today` : "Hard words first, then the whole sentence",
+      detail: outOfRecordings
+        ? `Today's recordings are used. Back at ${resetTimeLabel()}`
+        : o.today.attempts
+          ? `${o.today.attempts} recording${o.today.attempts === 1 ? "" : "s"} today`
+          : "Hard words first, then the whole sentence",
       href: "/practice",
-      done: o.today.attempts > 0,
+      done: o.today.attempts > 0 || outOfRecordings,
     },
   ];
   const first = tasks.find((t) => !t.done);
@@ -179,6 +188,21 @@ export function HomeView() {
               </div>
             </CardContent>
           </Card>
+
+          {nudge.visible && (
+            <UpgradeCard
+              title={`You have used today's ${me.usage.limit} recordings`}
+              currentPlan={me.plan}
+              trialAvailable={me.trialAvailable}
+              onDismiss={nudge.dismiss}
+            >
+              <p>
+                They come back at {resetTimeLabel()} your time. Until then, ear training, the sound library and your
+                drill list are all open. If you would rather keep recording now, Plus allows{" "}
+                {PLANS.plus.entitlements.dailyAnalyses} a day.
+              </p>
+            </UpgradeCard>
+          )}
 
           <Card>
             <CardHeader className="flex flex-row items-start justify-between gap-4">
@@ -263,7 +287,7 @@ export function HomeView() {
                   <p className="text-sm text-muted-foreground">Day streak</p>
                   <p className="flex items-center gap-2 text-4xl font-semibold tracking-tight tabular-nums">
                     {o.streak}
-                    <Flame className={cn("size-7", o.streak > 0 ? "text-orange-500" : "text-muted-foreground/40")} />
+                    <Flame className={cn("size-7", o.streak > 0 ? "text-brand" : "text-muted-foreground/40")} />
                   </p>
                 </div>
                 <div className="text-right text-xs text-muted-foreground">

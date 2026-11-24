@@ -9,18 +9,25 @@ interface Message {
   /** Plain sentences; rendered as paragraphs. */
   lines: string[];
   action?: { label: string; url: string };
+  /** Extra mail headers, e.g. List-Unsubscribe. */
+  headers?: Record<string, string>;
 }
 
 /**
  * Transactional email through Resend. Without RESEND_API_KEY the message is
  * written to the server log, which is enough for local development.
  */
-export async function sendEmail({ to, subject, lines, action }: Message): Promise<void> {
+export async function sendEmail({ to, subject, lines, action, headers }: Message): Promise<boolean> {
   const key = process.env.RESEND_API_KEY;
   const from = process.env.EMAIL_FROM;
   if (!key || !from) {
-    console.info(`[email not sent: RESEND_API_KEY/EMAIL_FROM unset] to=${to} subject="${subject}" ${action?.url ?? ""}`);
-    return;
+    // Links carry one-time tokens, so they are only printed outside production.
+    if (process.env.NODE_ENV === "production") {
+      console.error(`Email not sent (RESEND_API_KEY/EMAIL_FROM unset): subject="${subject}"`);
+    } else {
+      console.info(`[email not sent: RESEND_API_KEY/EMAIL_FROM unset] to=${to} subject="${subject}" ${action?.url ?? ""}`);
+    }
+    return false;
   }
   const html =
     `<div style="font-family:system-ui,sans-serif;font-size:15px;line-height:1.6;color:#111;max-width:480px">` +
@@ -29,7 +36,7 @@ export async function sendEmail({ to, subject, lines, action }: Message): Promis
       ? `<p><a href="${escapeHtml(action.url)}" style="display:inline-block;background:#111;color:#fff;padding:10px 18px;border-radius:999px;text-decoration:none">${escapeHtml(action.label)}</a></p>`
       : "") +
     `<p style="color:#777;font-size:13px">${escapeHtml(SITE.name)}</p></div>`;
-  const res = await fetch("https://api.resend.com/emails", {
+  const res = await fetch(`${process.env.RESEND_API_BASE ?? "https://api.resend.com"}/emails`, {
     method: "POST",
     headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
     body: JSON.stringify({
@@ -37,8 +44,13 @@ export async function sendEmail({ to, subject, lines, action }: Message): Promis
       to,
       subject,
       html,
+      ...(headers ? { headers } : {}),
       text: [...lines, action ? `${action.label}: ${action.url}` : ""].join("\n\n"),
     }),
   });
-  if (!res.ok) console.error(`Email to ${to} failed (${res.status})`);
+  if (!res.ok) {
+    console.error(`Email "${subject}" failed (${res.status})`);
+    return false;
+  }
+  return true;
 }

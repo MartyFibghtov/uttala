@@ -6,7 +6,6 @@ import {
   AlertCircle,
   ArrowLeft,
   ArrowRight,
-  AudioWaveform,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -36,6 +35,7 @@ import { WordCompareControls } from "@/components/word-compare";
 import {
   hear,
   loadReference,
+  postAssess,
   scoreColor,
   speakWithBrowser,
   UpgradeNeeded,
@@ -45,7 +45,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAccount } from "@/hooks/use-account";
-import { MAX_RECORDING_SECONDS, useRecorder } from "@/hooks/use-recorder";
+import { isSilent, MAX_RECORDING_SECONDS, recorderErrorMessage, SILENT_MESSAGE, useRecorder } from "@/hooks/use-recorder";
 import {
   decodeToMono16k,
   encodeWav,
@@ -63,8 +63,8 @@ import {
 } from "@/lib/languages";
 import { LEVELS, statusFor, type LevelId } from "@/lib/levels";
 import { enrichWordDiagnostics, extractFocusSounds, segmentWordToPhonemes } from "@/lib/phonetics";
-import { compareProsody, fallbackProsody, overallScore } from "@/lib/prosody";
-import { preloadRatingModel, rateWithDeductions } from "@/lib/rating";
+import { compareProsody, fallbackProsody, overallScore, pillarScores } from "@/lib/prosody";
+import { rateWithDeductions } from "@/lib/rating";
 import { SCORE_BANDS } from "@/lib/score-bands";
 import { soundForIpa, soundsFor } from "@/lib/sounds";
 import { recordAttempt } from "@/lib/store";
@@ -339,8 +339,9 @@ export function extractHighlightsFromTakes(
   }
 
   // 2. Prosody (Melody & Rhythm) highlights across takes
-  const rhythms = takes.map((t) => t.prosody.rhythm).filter((v): v is number => v !== null);
-  const intonations = takes.map((t) => t.prosody.intonation).filter((v): v is number => v !== null);
+  const pillars = takes.map((t) => pillarScores(t.result, t.prosody, lang));
+  const rhythms = pillars.map((p) => p.rhythm).filter((v): v is number => v !== null);
+  const intonations = pillars.map((p) => p.melody).filter((v): v is number => v !== null);
   const fluencies = takes.map((t) => t.prosody.fluency).filter((v): v is number => v !== null);
   const totalHesitations = takes.reduce((s, t) => s + t.prosody.hesitations, 0);
 
@@ -815,13 +816,15 @@ export function DiagnosticStageRecorder({
   const [listening, setListening] = useState(false);
   const [slow, setSlow] = useState(false);
   const [selectedWordIdx, setSelectedWordIdx] = useState<number | null>(null);
-  const outOfRecordings = me.usage.used >= me.usage.limit;
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const outOfRecordings = me.profile.onboarded && me.usage.used >= me.usage.limit;
+
+  const reportError = useCallback((msg: string) => {
+    setErrorMsg(msg);
+    toast.error(msg);
+  }, []);
 
   useEffect(() => stopPlayback, []);
-  // Fetch the sound model early so it is ready by the first recording (about 240 MB, once).
-  useEffect(() => {
-    preloadRatingModel().catch(() => undefined);
-  }, []);
 
   // Preload reference audio in the background so it is ready by the time the learner finishes recording.
   useEffect(() => {
@@ -860,11 +863,26 @@ export function DiagnosticStageRecorder({
 
   const analyse = useCallback(
     async (blob: Blob) => {
+      setErrorMsg(null);
       setBusy(true);
       try {
-        const samples = await decodeToMono16k(blob);
+        if (!blob.size) {
+          reportError("We couldn't capture any audio from your microphone. Please try again.");
+          return;
+        }
+        let samples: Float32Array;
+        try {
+          samples = await decodeToMono16k(blob);
+        } catch {
+          reportError("We couldn't read that recording from your microphone. Please try again.");
+          return;
+        }
         if (samples.length < SAMPLE_RATE * 0.4) {
-          toast.error("That was too short. Please read the full sentence.");
+          reportError("That was too short. Please read the full sentence. This did not use a recording.");
+          return;
+        }
+        if (isSilent(samples)) {
+          reportError(SILENT_MESSAGE);
           return;
         }
         const wav = encodeWav(samples);
@@ -877,13 +895,7 @@ export function DiagnosticStageRecorder({
         const refPromise = live
           ? loadReference(prompt.text.trim(), lang, DIAGNOSTIC_SCORING_LEVEL).catch(() => null)
           : Promise.resolve(null);
-        const res = await fetch("/api/assess", { method: "POST", body: form });
-        const engine = (await res.json()) as AssessResult & { error?: string; upgrade?: "limit" | "customText" };
-        if (engine.upgrade) {
-          promptUpgrade(engine.upgrade);
-          return;
-        }
-        if (!res.ok) throw new Error(engine.error ?? "Assessment failed.");
+        const engine = await postAssess(form);
         noteAnalysis();
 
         // The deduction rating needs the native reading; wait for it, but not indefinitely.
@@ -891,7 +903,7 @@ export function DiagnosticStageRecorder({
           refPromise,
           new Promise<null>((resolve) => setTimeout(() => resolve(null), 15000)),
         ]);
-        // Main rating: score by deduction from the on-device sound model (src/lib/rating.ts).
+        // Main rating: score by deduction from the sound model (src/lib/rating.ts).
         const rated = await rateWithDeductions(samples, engine, reference, lang);
         const data = rated.result;
 
@@ -946,12 +958,13 @@ export function DiagnosticStageRecorder({
           reference,
         });
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Could not analyse that recording.");
+        if (err instanceof UpgradeNeeded) promptUpgrade(err.reason);
+        else reportError(err instanceof Error ? err.message : "Could not analyse that recording.");
       } finally {
         setBusy(false);
       }
     },
-    [lang, live, me.entitlements.maxDrillWords, noteAnalysis, onTake, prompt, promptUpgrade],
+    [lang, live, me.entitlements.maxDrillWords, noteAnalysis, onTake, prompt, promptUpgrade, reportError],
   );
 
   const recorder = useRecorder(analyse);
@@ -960,21 +973,27 @@ export function DiagnosticStageRecorder({
     if (recorder.recording) {
       const blob = await recorder.stop();
       if (blob) await analyse(blob);
+      else reportError("We couldn't capture any audio from your microphone. Please try again.");
       return;
     }
     if (outOfRecordings) {
       promptUpgrade("limit");
       return;
     }
+    setErrorMsg(null);
     stopPlayback();
     try {
       await recorder.start();
-    } catch {
-      toast.error("Microphone access is needed to record. Allow it in your browser and try again.");
+    } catch (err) {
+      reportError(recorderErrorMessage(err));
     }
   };
 
   const Icon = STAGE_ICON[prompt.kind];
+  const stagePillars = useMemo(
+    () => (savedTake ? pillarScores(savedTake.result, savedTake.prosody, lang) : null),
+    [savedTake, lang],
+  );
   const highlights = useMemo(
     () => (savedTake ? extractTakeHighlights(savedTake.result, savedTake.prosody, lang, prompt.kind) : null),
     [savedTake, lang, prompt.kind],
@@ -1109,6 +1128,16 @@ export function DiagnosticStageRecorder({
             )}
           </div>
 
+          {errorMsg && (
+            <div
+              role="alert"
+              className="mx-5 mb-4 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50/80 px-3.5 py-2.5 text-xs text-red-900 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200 md:mx-6"
+            >
+              <AlertCircle className="mt-0.5 size-4 shrink-0" />
+              <span>{errorMsg}</span>
+            </div>
+          )}
+
           <div className="flex flex-wrap items-center gap-2 border-t px-4 py-3">
             <Button variant="outline" className="rounded-full" onClick={() => void listen()} disabled={listening}>
               {listening ? <Loader2 className="animate-spin" /> : <Volume2 />}
@@ -1166,7 +1195,7 @@ export function DiagnosticStageRecorder({
         </CardContent>
       </Card>
 
-      {savedTake && highlights && (
+      {savedTake && highlights && stagePillars && (
         <Card>
           <CardHeader className="flex flex-row items-center justify-between gap-4 pb-2">
             <div>
@@ -1234,20 +1263,30 @@ export function DiagnosticStageRecorder({
                 <div className="grid grid-cols-3 gap-2 text-center text-xs">
                   <div className="rounded-lg border bg-background p-2.5">
                     <span className="text-muted-foreground">Sounds</span>
-                    <p className={cn("mt-0.5 text-lg font-semibold tabular-nums", scoreColor(savedTake.result.scores.accuracy))}>
-                      {savedTake.result.scores.accuracy}%
+                    <p className={cn("mt-0.5 text-lg font-semibold tabular-nums", scoreColor(stagePillars.sounds))}>
+                      {stagePillars.sounds}%
                     </p>
                   </div>
                   <div className="rounded-lg border bg-background p-2.5">
                     <span className="text-muted-foreground">Rhythm</span>
-                    <p className={cn("mt-0.5 text-lg font-semibold tabular-nums", scoreColor(savedTake.prosody.rhythm ?? 80))}>
-                      {savedTake.prosody.rhythm ?? 80}%
+                    <p
+                      className={cn(
+                        "mt-0.5 text-lg font-semibold tabular-nums",
+                        scoreColor(stagePillars.rhythm ?? stagePillars.sounds),
+                      )}
+                    >
+                      {stagePillars.rhythm ?? stagePillars.sounds}%
                     </p>
                   </div>
                   <div className="rounded-lg border bg-background p-2.5">
                     <span className="text-muted-foreground">Melody</span>
-                    <p className={cn("mt-0.5 text-lg font-semibold tabular-nums", scoreColor(savedTake.prosody.intonation ?? 80))}>
-                      {savedTake.prosody.intonation ?? 80}%
+                    <p
+                      className={cn(
+                        "mt-0.5 text-lg font-semibold tabular-nums",
+                        scoreColor(stagePillars.melody ?? stagePillars.sounds),
+                      )}
+                    >
+                      {stagePillars.melody ?? stagePillars.sounds}%
                     </p>
                   </div>
                 </div>
@@ -1356,14 +1395,17 @@ export function SpeechLevelRankingScreen({
   const language = getLanguage(lang);
   const firstName = userName ? userName.trim().split(" ")[0] : undefined;
 
+  const perTake = takes.map((t) => pillarScores(t.result, t.prosody, lang));
   const avgScore = Math.round(takes.reduce((s, t) => s + t.attempt.overall, 0) / Math.max(1, takes.length));
-  const avgSounds = Math.round(takes.reduce((s, t) => s + t.result.scores.accuracy, 0) / Math.max(1, takes.length));
-  const avgRhythm = Math.round(
-    takes.reduce((s, t) => s + (t.prosody.rhythm ?? t.result.scores.accuracy), 0) / Math.max(1, takes.length),
-  );
-  const avgMelody = Math.round(
-    takes.reduce((s, t) => s + (t.prosody.intonation ?? t.result.scores.accuracy), 0) / Math.max(1, takes.length),
-  );
+  const avgSounds = Math.round(perTake.reduce((s, p) => s + p.sounds, 0) / Math.max(1, perTake.length));
+  const rhythmVals = perTake.map((p) => p.rhythm).filter((v): v is number => v !== null);
+  const avgRhythm = rhythmVals.length
+    ? Math.round(rhythmVals.reduce((s, v) => s + v, 0) / rhythmVals.length)
+    : avgSounds;
+  const melodyVals = perTake.map((p) => p.melody).filter((v): v is number => v !== null);
+  const avgMelody = melodyVals.length
+    ? Math.round(melodyVals.reduce((s, v) => s + v, 0) / melodyVals.length)
+    : avgSounds;
 
   const rank = rankForScore(avgScore);
   const switchTo = rank.recommended !== me.profile.level ? rank.recommended : null;
@@ -1412,20 +1454,25 @@ export function SpeechLevelRankingScreen({
               <p className="mt-3 max-w-md text-sm leading-relaxed text-muted-foreground">{rank.description}</p>
             </div>
 
-            <div className="grid grid-cols-3 gap-2.5">
-              {[
-                { label: "Sounds", value: avgSounds, icon: Ear },
-                { label: "Rhythm", value: avgRhythm, icon: Timer },
-                { label: "Melody", value: avgMelody, icon: Music },
-              ].map(({ label, value, icon: PillarIcon }) => (
-                <div key={label} className="rounded-xl border bg-background/85 p-3">
-                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <PillarIcon className="size-3.5" />
-                    {label}
+            <div className="space-y-2">
+              <p className="text-[11px] font-medium text-muted-foreground">
+                Average across all {takes.length} readings
+              </p>
+              <div className="grid grid-cols-3 gap-2.5">
+                {[
+                  { label: "Sounds", value: avgSounds, icon: Ear },
+                  { label: "Rhythm", value: avgRhythm, icon: Timer },
+                  { label: "Melody", value: avgMelody, icon: Music },
+                ].map(({ label, value, icon: PillarIcon }) => (
+                  <div key={label} className="rounded-xl border bg-background/85 p-3">
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <PillarIcon className="size-3.5" />
+                      {label}
+                    </div>
+                    <p className={cn("mt-1 text-2xl font-semibold tabular-nums", scoreColor(value))}>{value}%</p>
                   </div>
-                  <p className={cn("mt-1 text-2xl font-semibold tabular-nums", scoreColor(value))}>{value}%</p>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
 
             <details className="disclosure group rounded-xl border bg-background/85">
@@ -1435,21 +1482,31 @@ export function SpeechLevelRankingScreen({
               </summary>
               <div className="space-y-3 border-t px-4 py-3 text-xs">
                 <div className="divide-y">
-                  {takes.map((t, i) => (
-                    <div key={i} className="flex items-center justify-between gap-3 py-2 first:pt-0 last:pb-0">
-                      <div className="min-w-0">
-                        <p className="font-medium text-foreground">
-                          {i + 1}. {t.prompt.title}
-                        </p>
-                        <p className="truncate text-muted-foreground" lang={lang}>
-                          {t.prompt.text}
-                        </p>
+                  {takes.map((t, i) => {
+                    const p = perTake[i];
+                    return (
+                      <div key={i} className="flex items-center justify-between gap-3 py-2 first:pt-0 last:pb-0">
+                        <div className="min-w-0">
+                          <p className="font-medium text-foreground">
+                            Reading {i + 1} · {t.prompt.title}
+                          </p>
+                          <p className="truncate text-muted-foreground" lang={lang}>
+                            {t.prompt.text}
+                          </p>
+                          <p className="mt-0.5 text-[11px] text-muted-foreground tabular-nums">
+                            Sounds {p.sounds}% · Rhythm {p.rhythm !== null ? `${p.rhythm}%` : "–"} · Melody{" "}
+                            {p.melody !== null ? `${p.melody}%` : "–"}
+                          </p>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <span className={cn("block text-sm font-semibold tabular-nums", scoreColor(t.attempt.overall))}>
+                            {t.attempt.overall}%
+                          </span>
+                          <span className="block text-[10px] text-muted-foreground">overall</span>
+                        </div>
                       </div>
-                      <span className={cn("shrink-0 text-sm font-semibold tabular-nums", scoreColor(t.attempt.overall))}>
-                        {t.attempt.overall}%
-                      </span>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
 
                 <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-card p-3">
@@ -1679,7 +1736,7 @@ export function GoodAndBadBreakdownScreen({
 }
 
 /**
- * Feedback Screen 3: Scoring Scale & Today's Lesson Plan (inspired by Reference Images 1, 3, and 4).
+ * Feedback Screen 3: Scoring Scale & First Lesson Plan.
  */
 export function ScoringAndPlanScreen({
   takes,
@@ -1696,10 +1753,10 @@ export function ScoringAndPlanScreen({
   const selectedPlanItem = lessonWords[selectedPlanIdx] ?? lessonWords[0];
 
   const bandStyles = [
-    { bar: "bg-emerald-500", wash: "from-emerald-500/20 via-emerald-500/5 to-transparent", text: "text-emerald-700 dark:text-emerald-400" },
-    { bar: "bg-amber-400", wash: "from-amber-400/20 via-amber-400/5 to-transparent", text: "text-amber-700 dark:text-amber-300" },
-    { bar: "bg-orange-500", wash: "from-orange-500/20 via-orange-500/5 to-transparent", text: "text-orange-700 dark:text-orange-400" },
-    { bar: "bg-red-500", wash: "from-red-500/20 via-red-500/5 to-transparent", text: "text-red-700 dark:text-red-400" },
+    { dot: "bg-emerald-500", text: "text-emerald-700 dark:text-emerald-400" },
+    { dot: "bg-amber-400", text: "text-amber-700 dark:text-amber-300" },
+    { dot: "bg-orange-500", text: "text-orange-700 dark:text-orange-400" },
+    { dot: "bg-red-500", text: "text-red-700 dark:text-red-400" },
   ];
   const bands = SCORE_BANDS.map((b, i) => ({ ...b, range: `${b.range}%`, ...bandStyles[i] }));
 
@@ -1707,159 +1764,128 @@ export function ScoringAndPlanScreen({
     <div className="space-y-5">
       <CoachBanner palette="sky" label="How Scoring Works">
         As you practise, every word and sound gets a score. Here is what the scale means — and the words from your
-        assessment that we queued for your first lesson.
+        assessment waiting in Today&apos;s Plan.
       </CoachBanner>
 
       <div className="grid gap-5 lg:grid-cols-2">
-        {/* Left Card: Scoring Scale (Reference Image 4 concept in SayClear's design) */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Scoring Scale</CardTitle>
-            <p className="text-xs text-muted-foreground">
+            <CardTitle className="text-base">Scoring scale</CardTitle>
+            <p className="text-sm text-muted-foreground">
               Every word, sound and melody curve is rated on the same 0–100 scale.
             </p>
           </CardHeader>
-          <CardContent className="space-y-2.5">
-            {bands.map((b) => (
-              <details key={b.label} className="disclosure group rounded-xl border bg-background overflow-hidden">
-                <summary className="relative flex items-center justify-between gap-4 px-4 py-3.5 select-none">
-                  <span className={cn("absolute inset-y-0 left-0 w-1.5", b.bar)} aria-hidden />
-                  <span
-                    className={cn("pointer-events-none absolute inset-0 bg-gradient-to-r", b.wash)}
-                    aria-hidden
-                  />
-                  <span className="relative pl-2 text-base font-semibold tabular-nums">{b.range}</span>
-                  <span className="relative flex items-center gap-2">
-                    <span className={cn("text-sm font-semibold", b.text)}>{b.label}</span>
-                    <ChevronDown className="size-4 text-muted-foreground transition-transform duration-200 group-open:rotate-180" />
-                  </span>
-                </summary>
-                <p className="border-t bg-card px-5 py-2.5 text-xs text-muted-foreground">{b.detail}</p>
-              </details>
-            ))}
+          <CardContent>
+            <div className="divide-y overflow-hidden rounded-xl border">
+              {bands.map((b) => (
+                <details key={b.label} className="disclosure group">
+                  <summary className="flex items-center justify-between gap-4 px-4 py-3 transition-colors select-none hover:bg-secondary/50">
+                    <span className="flex items-center gap-3">
+                      <span
+                        className={cn("size-2 shrink-0 rounded-full ring-4 ring-current/10", b.dot, b.text)}
+                        aria-hidden
+                      />
+                      <span className="text-sm font-semibold tabular-nums">{b.range}</span>
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <span className={cn("text-sm font-medium", b.text)}>{b.label}</span>
+                      <ChevronDown className="size-4 text-muted-foreground transition-transform duration-200 group-open:rotate-180" />
+                    </span>
+                  </summary>
+                  <p className="px-4 pb-3 text-xs leading-relaxed text-muted-foreground">{b.detail}</p>
+                </details>
+              ))}
+            </div>
           </CardContent>
         </Card>
 
-        {/* Right Card: Today's Lesson Plan Stepper (Reference Images 1 & 3 concept in SayClear's design) */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Your First Lesson Plan</CardTitle>
-            <p className="text-xs text-muted-foreground">
-              Great work on the assessment. Next, let&apos;s practise the words that were most challenging for you.
+            <CardTitle className="text-base">Your first lesson plan</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Great work on the assessment. Your focus words are queued up to practise in the app.
             </p>
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* Step 1: Completed Initial Assessment */}
-            <div className="flex items-stretch gap-3.5">
-              <div className="flex flex-col items-center">
-                <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-amber-400 text-amber-950 shadow-xs">
-                  <Star className="size-3.5 fill-current" />
+            <div className="flex items-center justify-between gap-3 rounded-xl border px-4 py-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300">
+                  <Check className="size-4" />
                 </span>
-                <span className="my-1.5 w-0.5 flex-1 border-l-2 border-dashed border-border" aria-hidden />
-              </div>
-              <div className="flex flex-1 items-center justify-between rounded-2xl border bg-secondary/40 px-4 py-3.5">
-                <div>
-                  <p className="text-sm font-semibold">Initial Assessment</p>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">Initial assessment</p>
                   <p className="text-xs text-muted-foreground">3 readings · Sounds, Rhythm &amp; Melody</p>
                 </div>
-                <div className="flex items-center gap-2.5">
-                  <span className="rounded-lg bg-amber-400/90 px-2.5 py-1 text-xs font-bold text-amber-950 tabular-nums">
-                    {avgScore}%
-                  </span>
-                  <span className="flex size-9 items-center justify-center rounded-full bg-background border">
-                    <AudioWaveform className="size-4" />
-                  </span>
-                </div>
               </div>
+              <span className={cn("shrink-0 text-xl font-semibold tabular-nums", scoreColor(avgScore))}>
+                {avgScore}%
+              </span>
             </div>
 
-            {/* Step 2: Focus Words Cluster */}
-            <div className="flex items-stretch gap-3.5">
-              <div className="flex flex-col items-center">
-                <span className="flex size-7 shrink-0 items-center justify-center rounded-full border-2 border-foreground bg-background text-xs font-semibold">
-                  2
+            <div className="space-y-3">
+              <div className="flex items-baseline justify-between gap-2">
+                <p className="text-sm font-medium">Focus words</p>
+                <span className="text-xs text-muted-foreground tabular-nums">
+                  {lessonWords.length} {lessonWords.length === 1 ? "word" : "words"}
                 </span>
               </div>
-              <div className="aurora-wash relative flex-1 overflow-hidden rounded-2xl border p-5">
-                {/* Subtle concentric sound-wave rings in background */}
-                <svg
-                  viewBox="0 0 240 160"
-                  className="pointer-events-none absolute inset-0 size-full opacity-25"
-                  aria-hidden
-                >
-                  {[32, 54, 76, 98].map((r) => (
-                    <circle
-                      key={r}
-                      cx="120"
-                      cy="85"
-                      r={r}
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1"
-                      className="text-foreground/40"
-                    />
-                  ))}
-                </svg>
-                <div className="relative z-10">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-semibold">Target Words Lesson</p>
-                    <Badge variant="secondary" className="text-[11px]">
-                      {Math.min(3, lessonWords.length)} words ready
-                    </Badge>
-                  </div>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    Picked from your lowest-scoring sounds in the scan — tap any word to compare:
-                  </p>
-                  <div className="mt-4 flex flex-wrap justify-center gap-2">
-                    {lessonWords.map(({ word }, idx) => (
-                      <button
-                        key={`${word.index}-${word.text}`}
-                        type="button"
-                        onClick={() => setSelectedPlanIdx(idx)}
-                        lang={lang}
-                        className={cn(
-                          "inline-flex items-center gap-1.5 rounded-xl border bg-background/90 px-3 py-1.5 text-sm font-medium shadow-2xs transition-colors hover:bg-secondary",
-                          selectedPlanIdx === idx && "border-foreground ring-1 ring-foreground",
-                        )}
-                      >
-                        {word.text}
-                        <span className={cn("text-xs font-semibold tabular-nums", scoreColor(word.score))}>
-                          {word.score}%
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                  {selectedPlanItem && (
-                    <div className="mt-4 rounded-xl border bg-background/90 p-3 text-left">
-                      <WordCompareControls
-                        word={selectedPlanItem.word}
-                        lang={lang}
-                        showHeader
-                        compact
-                        canPlaySelf={Boolean(
-                          selectedPlanItem.take.userUrl &&
-                            selectedPlanItem.word.start !== undefined &&
-                            selectedPlanItem.word.end !== undefined,
-                        )}
-                        canPlayTarget
-                        onPlaySelf={(intentId) =>
-                          selectedPlanItem.take.userUrl
-                            ? playWordSlice(selectedPlanItem.take.userUrl, selectedPlanItem.word, { intentId })
-                            : Promise.resolve()
-                        }
-                        onPlayTarget={(intentId) =>
-                          hear(selectedPlanItem.word.text, {
-                            lang,
-                            level: DIAGNOSTIC_SCORING_LEVEL,
-                            live,
-                            intentId,
-                          })
-                        }
-                      />
-                    </div>
-                  )}
-                </div>
+              <p className="text-xs text-muted-foreground">
+                Picked from your lowest-scoring sounds in the scan — tap any word to compare.
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {lessonWords.map(({ word }, idx) => {
+                  const selected = selectedPlanIdx === idx;
+                  return (
+                    <button
+                      key={`${word.index}-${word.text}`}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => setSelectedPlanIdx(idx)}
+                      lang={lang}
+                      className={cn(
+                        "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                        selected
+                          ? "border-foreground bg-foreground text-background"
+                          : "text-foreground hover:bg-secondary",
+                      )}
+                    >
+                      <span>{word.text}</span>
+                      <span className={cn("tabular-nums", selected ? "text-background/85" : scoreColor(word.score))}>
+                        {word.score}%
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
+              {selectedPlanItem && (
+                <div className="rounded-xl border bg-secondary/35 p-3">
+                  <WordCompareControls
+                    word={selectedPlanItem.word}
+                    lang={lang}
+                    showHeader
+                    compact
+                    canPlaySelf={Boolean(
+                      selectedPlanItem.take.userUrl &&
+                        selectedPlanItem.word.start !== undefined &&
+                        selectedPlanItem.word.end !== undefined,
+                    )}
+                    canPlayTarget
+                    onPlaySelf={(intentId) =>
+                      selectedPlanItem.take.userUrl
+                        ? playWordSlice(selectedPlanItem.take.userUrl, selectedPlanItem.word, { intentId })
+                        : Promise.resolve()
+                    }
+                    onPlayTarget={(intentId) =>
+                      hear(selectedPlanItem.word.text, {
+                        lang,
+                        level: DIAGNOSTIC_SCORING_LEVEL,
+                        live,
+                        intentId,
+                      })
+                    }
+                  />
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -1886,9 +1912,20 @@ export function WordPracticeLessonScreen({
   const [wordIdx, setWordIdx] = useState(0);
   const [slow, setSlow] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [overrides, setOverrides] = useState<
     Record<number, { word: WordResult; userUrl: string; score: number }>
   >({});
+
+  const reportError = useCallback((msg: string) => {
+    setErrorMsg(msg);
+    toast.error(msg);
+  }, []);
+
+  const selectWord = useCallback((nextIdx: number) => {
+    setErrorMsg(null);
+    setWordIdx(nextIdx);
+  }, []);
 
   useEffect(() => stopPlayback, []);
 
@@ -1937,11 +1974,26 @@ export function WordPracticeLessonScreen({
   const analyseWord = useCallback(
     async (blob: Blob) => {
       if (!activeWord) return;
+      setErrorMsg(null);
       setBusy(true);
       try {
-        const samples = await decodeToMono16k(blob);
+        if (!blob.size) {
+          reportError("We couldn't capture any audio from your microphone. Please try again.");
+          return;
+        }
+        let samples: Float32Array;
+        try {
+          samples = await decodeToMono16k(blob);
+        } catch {
+          reportError("We couldn't read that recording from your microphone. Please try again.");
+          return;
+        }
         if (samples.length < SAMPLE_RATE * 0.25) {
-          toast.error("That was too short. Say the full word clearly.");
+          reportError("That was too short. Say the full word clearly.");
+          return;
+        }
+        if (isSilent(samples)) {
+          reportError(SILENT_MESSAGE);
           return;
         }
         const wav = encodeWav(samples);
@@ -1951,13 +2003,7 @@ export function WordPracticeLessonScreen({
         form.append("lang", lang);
         form.append("level", DIAGNOSTIC_SCORING_LEVEL);
 
-        const res = await fetch("/api/assess", { method: "POST", body: form });
-        const data = (await res.json()) as AssessResult & { error?: string; upgrade?: "limit" | "customText" };
-        if (data.upgrade) {
-          promptUpgrade(data.upgrade);
-          return;
-        }
-        if (!res.ok) throw new Error(data.error ?? "Assessment failed.");
+        const data = await postAssess(form);
         noteAnalysis();
 
         const scoredWord = data.words[0] ?? {
@@ -1982,12 +2028,13 @@ export function WordPracticeLessonScreen({
           },
         }));
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Could not score that word.");
+        if (err instanceof UpgradeNeeded) promptUpgrade(err.reason);
+        else reportError(err instanceof Error ? err.message : "Could not score that word.");
       } finally {
         setBusy(false);
       }
     },
-    [activeWord, lang, me.entitlements.maxDrillWords, noteAnalysis, promptUpgrade, wordIdx],
+    [activeWord, lang, me.entitlements.maxDrillWords, noteAnalysis, promptUpgrade, reportError, wordIdx],
   );
 
   const recorder = useRecorder(analyseWord);
@@ -1996,17 +2043,19 @@ export function WordPracticeLessonScreen({
     if (recorder.recording) {
       const blob = await recorder.stop();
       if (blob) await analyseWord(blob);
+      else reportError("We couldn't capture any audio from your microphone. Please try again.");
       return;
     }
-    if (me.usage.used >= me.usage.limit) {
+    if (me.profile.onboarded && me.usage.used >= me.usage.limit) {
       promptUpgrade("limit");
       return;
     }
+    setErrorMsg(null);
     stopPlayback();
     try {
       await recorder.start();
-    } catch {
-      toast.error("Microphone access is needed to record.");
+    } catch (err) {
+      reportError(recorderErrorMessage(err));
     }
   };
 
@@ -2037,7 +2086,7 @@ export function WordPracticeLessonScreen({
                 <button
                   key={t.word.text}
                   type="button"
-                  onClick={() => setWordIdx(i)}
+                  onClick={() => selectWord(i)}
                   lang={lang}
                   className={cn(
                     "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors",
@@ -2189,6 +2238,16 @@ export function WordPracticeLessonScreen({
             </Button>
           </div>
 
+          {errorMsg && (
+            <div
+              role="alert"
+              className="mt-4 flex w-full max-w-md items-start gap-2 rounded-xl border border-red-200 bg-red-50/80 px-3.5 py-2.5 text-left text-xs text-red-900 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200"
+            >
+              <AlertCircle className="mt-0.5 size-4 shrink-0" />
+              <span>{errorMsg}</span>
+            </div>
+          )}
+
           <div className="mt-5 flex w-full max-w-sm items-center justify-between gap-4">
             <Button
               variant="outline"
@@ -2196,7 +2255,7 @@ export function WordPracticeLessonScreen({
               className="rounded-full"
               aria-label="Previous word"
               disabled={wordIdx === 0}
-              onClick={() => setWordIdx((i) => Math.max(0, i - 1))}
+              onClick={() => selectWord(Math.max(0, wordIdx - 1))}
             >
               <ArrowLeft className="size-4" />
             </Button>
@@ -2231,7 +2290,7 @@ export function WordPracticeLessonScreen({
               className="rounded-full"
               aria-label="Next word"
               disabled={wordIdx >= targets.length - 1}
-              onClick={() => setWordIdx((i) => Math.min(targets.length - 1, i + 1))}
+              onClick={() => selectWord(Math.min(targets.length - 1, wordIdx + 1))}
             >
               <ArrowRight className="size-4" />
             </Button>

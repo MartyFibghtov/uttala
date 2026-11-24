@@ -1,6 +1,7 @@
 import { PAID_PLANS, type Interval, type PlanId } from "@/lib/plans";
+import { configuredOrigin } from "@/lib/site";
 import { getUser, unauthorized } from "@/lib/server/account";
-import { checkoutUrl, stripeEnabled } from "@/lib/server/stripe";
+import { BillingError, checkoutUrl, stripeEnabled } from "@/lib/server/stripe";
 
 export async function POST(request: Request) {
   const user = await getUser(request);
@@ -13,9 +14,10 @@ export async function POST(request: Request) {
   if (!plan || !interval) return Response.json({ error: "Choose a plan first." }, { status: 400 });
 
   try {
-    const origin = process.env.BETTER_AUTH_URL ?? new URL(request.url).origin;
+    const origin = configuredOrigin(request);
     return Response.json({ url: await checkoutUrl(user, plan, interval, origin) });
   } catch (err) {
+    if (err instanceof BillingError) return Response.json({ error: err.message }, { status: 403 });
     console.error("checkout failed", err);
     return Response.json({ error: "We could not start the checkout. Please try again." }, { status: 502 });
   }

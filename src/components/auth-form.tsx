@@ -5,12 +5,12 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 import { Loader2 } from "lucide-react";
-import { Logo } from "@/components/app-shell";
+import { Logo } from "@/components/logo";
 import { ARTWORKS } from "@/components/artwork";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { authClient } from "@/lib/auth-client";
+import { authClient, navigate } from "@/lib/auth-client";
 
 type Mode = "sign-in" | "sign-up" | "forgot" | "reset";
 
@@ -75,14 +75,17 @@ export function AuthForm({ mode, googleEnabled }: { mode: Mode; googleEnabled?: 
   const copy = COPY[mode];
   const token = params.get("token");
   const oauthError = params.get("error");
+  const linkInvalid = mode === "reset" && (!token || oauthError === "INVALID_TOKEN");
   const displayedError =
     error ??
-    (oauthError
-      ? (OAUTH_ERRORS[oauthError] ?? "Google sign-in could not be completed. Please try again.")
-      : null);
+    (linkInvalid
+      ? "This reset link is not valid any more. Request a new one."
+      : oauthError && mode !== "reset" && mode !== "forgot"
+        ? (OAUTH_ERRORS[oauthError] ?? "Google sign-in could not be completed. Please try again.")
+        : null);
 
   useEffect(() => {
-    if (googleEnabled !== undefined) return;
+    if (googleEnabled !== undefined || (mode !== "sign-in" && mode !== "sign-up")) return;
     let cancelled = false;
     fetch("/api/plans")
       .then((r) => r.json() as Promise<{ google?: boolean }>)
@@ -91,7 +94,7 @@ export function AuthForm({ mode, googleEnabled }: { mode: Mode; googleEnabled?: 
     return () => {
       cancelled = true;
     };
-  }, [googleEnabled]);
+  }, [googleEnabled, mode]);
 
   const signInWithGoogle = async () => {
     setGoogleBusy(true);
@@ -112,17 +115,22 @@ export function AuthForm({ mode, googleEnabled }: { mode: Mode; googleEnabled?: 
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    if (busy) return;
+    if (mode === "sign-up" && !name.trim()) {
+      setError("Enter your first name.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
       if (mode === "sign-up") {
         const { error } = await authClient.signUp.email({ name: name.trim(), email: email.trim(), password });
         if (error) throw new Error(error.message ?? "We could not create the account.");
-        window.location.assign("/onboarding");
+        navigate("/onboarding");
       } else if (mode === "sign-in") {
         const { error } = await authClient.signIn.email({ email: email.trim(), password });
         if (error) throw new Error(error.message ?? "Email or password is not right.");
-        window.location.assign("/home");
+        navigate("/home");
       } else if (mode === "forgot") {
         const { error } = await authClient.requestPasswordReset({ email: email.trim(), redirectTo: "/reset-password" });
         if (error) throw new Error(error.message ?? "We could not send the link.");
@@ -131,7 +139,7 @@ export function AuthForm({ mode, googleEnabled }: { mode: Mode; googleEnabled?: 
         if (!token) throw new Error("This reset link is not valid any more. Request a new one.");
         const { error } = await authClient.resetPassword({ newPassword: password, token });
         if (error) throw new Error(error.message ?? "We could not save the new password.");
-        window.location.assign("/sign-in?reset=1");
+        navigate("/sign-in?reset=1");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
@@ -152,21 +160,28 @@ export function AuthForm({ mode, googleEnabled }: { mode: Mode; googleEnabled?: 
           <p className="mt-1.5 text-sm text-muted-foreground">{copy.lead}</p>
 
           {params.get("reset") && mode === "sign-in" && (
-            <p className="mt-4 rounded-lg border bg-secondary px-3 py-2 text-sm">
+            <p className="mt-4 rounded-lg border bg-secondary px-3 py-2 text-sm" role="status">
               Password changed. Sign in with the new one.
             </p>
           )}
 
           {sent ? (
-            <p className="mt-6 rounded-lg border bg-secondary px-3 py-3 text-sm" role="status">
-              If an account exists for {email.trim()}, a reset link is on its way. It works for one hour.
-            </p>
+            <div className="mt-6 rounded-lg border bg-secondary px-3 py-3 text-sm" role="status">
+              <p>If an account exists for {email.trim()}, a reset link is on its way. It works for one hour.</p>
+              <button
+                type="button"
+                className="mt-2 text-xs underline underline-offset-4"
+                onClick={() => setSent(false)}
+              >
+                Use a different email
+              </button>
+            </div>
           ) : (
             <form onSubmit={submit} className="mt-6 space-y-4">
               {mode === "sign-up" && (
                 <div className="space-y-1.5">
                   <Label htmlFor="name">First name</Label>
-                  <Input id="name" autoComplete="given-name" required value={name} onChange={(e) => setName(e.target.value)} />
+                  <Input id="name" autoComplete="given-name" required maxLength={80} value={name} onChange={(e) => setName(e.target.value)} />
                 </div>
               )}
               {needsEmail && (
@@ -197,7 +212,8 @@ export function AuthForm({ mode, googleEnabled }: { mode: Mode; googleEnabled?: 
                     type="password"
                     autoComplete={mode === "sign-in" ? "current-password" : "new-password"}
                     required
-                    minLength={8}
+                    minLength={mode === "sign-in" ? undefined : 8}
+                    maxLength={128}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                   />
@@ -209,7 +225,7 @@ export function AuthForm({ mode, googleEnabled }: { mode: Mode; googleEnabled?: 
                   {displayedError}
                 </p>
               )}
-              <Button type="submit" className="w-full rounded-full" disabled={busy || googleBusy}>
+              <Button type="submit" className="w-full rounded-full" disabled={busy || googleBusy || linkInvalid}>
                 {busy && <Loader2 className="animate-spin" />}
                 {copy.submit}
               </Button>
@@ -272,22 +288,28 @@ export function AuthForm({ mode, googleEnabled }: { mode: Mode; googleEnabled?: 
         </div>
       </div>
 
-      <div className="aurora-wash relative hidden overflow-hidden border-l bg-secondary/40 lg:block">
+      <div className="aurora-wash relative hidden overflow-hidden border-l bg-secondary/40 lg:flex lg:flex-col">
         <Image
-          src={ARTWORKS.heroAcoustic.src}
+          src={ARTWORKS.authAcoustic.src}
           alt=""
           fill
-          sizes="50vw"
+          quality={95}
+          sizes="(min-width: 1024px) 50vw, 1px"
           loading="eager"
           fetchPriority="high"
-          className="object-cover object-center dark:brightness-[0.8]"
+          className="object-cover object-top dark:brightness-[0.86] dark:contrast-[1.04]"
         />
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-background/90 via-background/20 to-transparent" />
-        <div className="absolute right-10 bottom-10 left-10 max-w-md rounded-2xl border bg-card/85 p-6 shadow-lg ring-1 ring-black/5 backdrop-blur-md dark:ring-white/10">
-          <p className="text-2xl font-semibold tracking-tight">Hear it. Say it. See exactly what to fix.</p>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Word-by-word feedback on your own voice, in 17 languages.
-          </p>
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-background/35 via-transparent to-background/20" />
+        <div className="relative z-10 px-8 pt-10 xl:px-12 xl:pt-12">
+          <div className="relative mx-auto max-w-lg overflow-hidden rounded-2xl border border-border/80 bg-card/88 p-6 shadow-lg ring-1 ring-black/5 backdrop-blur-md dark:ring-white/10">
+            <div className="aurora-line absolute inset-x-6 top-0" aria-hidden="true" />
+            <p className="text-balance text-2xl font-semibold tracking-tight text-card-foreground">
+              Hear it. Say it. See exactly what to fix.
+            </p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Word-by-word feedback on your own voice, in 17 languages.
+            </p>
+          </div>
         </div>
       </div>
     </div>

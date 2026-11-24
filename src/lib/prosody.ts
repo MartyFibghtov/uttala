@@ -1,4 +1,5 @@
 import { pitchAt, type PitchTrack } from "./audio";
+import { nativeLevelFor, nativeProsodyScore } from "./deductions";
 import { SCORE_SCALE } from "./levels";
 import type { Span } from "./text";
 import type { AssessResult, ContourPoint, ProsodyResult, WordResult } from "./types";
@@ -232,4 +233,47 @@ export function overallFor(result: AssessResult, prosody: ProsodyResult | null):
     rhythm: prosody?.rhythm ?? null,
     intonation: prosody?.intonation ?? null,
   });
+}
+
+/**
+ * Calibrated Sounds, Rhythm, and Melody scores for one take, aligned with the native-anchored
+ * deduction scale so pillar cards never contradict the overall score.
+ */
+export function pillarScores(
+  result: AssessResult,
+  prosody: ProsodyResult | null,
+  lang: string,
+): { sounds: number; rhythm: number | null; melody: number | null } {
+  const level = nativeLevelFor(lang);
+  const items = result.deduction?.items;
+
+  const sounds = items
+    ? Math.max(
+        0,
+        Math.round(
+          100 -
+            items
+              .filter((d) => d.kind === "sound" || d.kind === "word")
+              .reduce((sum, d) => sum + d.points, 0),
+        ),
+      )
+    : result.scores.accuracy;
+
+  const timingLoss = items
+    ? items
+        .filter((d) => d.kind === "pause" || d.kind === "pace")
+        .reduce((sum, d) => sum + d.points, 0)
+    : 0;
+
+  const rhythm =
+    prosody?.rhythm !== null && prosody?.rhythm !== undefined
+      ? Math.max(0, Math.round(nativeProsodyScore(prosody.rhythm, level.rhythm) - timingLoss))
+      : null;
+
+  const melody =
+    prosody?.intonation !== null && prosody?.intonation !== undefined
+      ? nativeProsodyScore(prosody.intonation, level.intonation)
+      : null;
+
+  return { sounds, rhythm, melody };
 }

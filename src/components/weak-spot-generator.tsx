@@ -16,6 +16,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { useAccount } from "@/hooks/use-account";
 import { getLanguage } from "@/lib/languages";
 import type { LevelId } from "@/lib/levels";
 import { contrastsFor } from "@/lib/minimal-pairs";
@@ -156,20 +157,25 @@ export interface GenerateRequestOptions {
 }
 
 export async function requestGeneratedText(opts: GenerateRequestOptions): Promise<GeneratedText> {
-  const res = await fetch("/api/generate", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(opts),
-  });
-  const data = (await res.json()) as GeneratedText & { error?: string };
-  if (!res.ok) throw new Error(data.error ?? "Could not generate a practice sentence.");
+  let res: Response;
+  try {
+    res = await fetch("/api/generate", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(opts),
+    });
+  } catch {
+    throw new Error("We could not reach SayClear. Check your connection and try again.");
+  }
+  const data = (await res.json().catch(() => null)) as (GeneratedText & { error?: string }) | null;
+  if (!res.ok || !data) throw new Error(data?.error ?? "Could not generate a practice sentence right now. Please try again.");
   addGeneratedText(data);
   return data;
 }
 
 /** Build the default weak-spot payload from the learner's profile for one-click generation. */
 export function defaultGeneratePayload(lang: string, level: LevelId, profile: WeakProfile): GenerateRequestOptions {
-  const targetWords = (profile.dueWords.length ? profile.dueWords : profile.weakWords).slice(0, 5).map((w) => ({
+  const targetWords = (profile.dueWords.length ? profile.dueWords : profile.weakWords).slice(0, 3).map((w) => ({
     text: w.text,
     heard: w.heard,
     avg: w.avg,
@@ -230,13 +236,16 @@ export function WeakSpotGenerator({
   const [selectedContrasts, setSelectedContrasts] = useState<string[] | null>(null);
   const [selectedProsody, setSelectedProsody] = useState<ProsodyFocus[] | null>(null);
   const [customFocus, setCustomFocus] = useState("");
+  const { me, promptUpgrade } = useAccount();
+  // Free-text focus is a Plus feature (enforced in /api/generate); the picked weak spots stay free.
+  const canFocus = me.entitlements.customText;
 
   const customInputId = useId();
   const customHintId = useId();
 
   // Default selections reflect the learner's tracked weak spots when they haven't customised yet.
   const defaultWordKeys = useMemo(
-    () => (profile.dueWords.length ? profile.dueWords : profile.weakWords).slice(0, 5).map((w) => w.text),
+    () => (profile.dueWords.length ? profile.dueWords : profile.weakWords).slice(0, 3).map((w) => w.text),
     [profile.dueWords, profile.weakWords],
   );
   const defaultSoundIpas = useMemo(() => {
@@ -324,7 +333,7 @@ export function WeakSpotGenerator({
         sounds,
         contrasts,
         prosody: activeProsody,
-        customFocus: customFocus.trim() || undefined,
+        customFocus: (canFocus && customFocus.trim()) || undefined,
         avoid: profile.recentTexts,
         selectedOnly: true,
       });
@@ -393,8 +402,8 @@ export function WeakSpotGenerator({
             <DialogTitle>Generate for your {language.name} weak spots</DialogTitle>
             <DialogDescription>
               {profile.hasTrackedWeakSpots
-                ? "Your weakest words, sounds and ear contrasts are pre-selected below. Adjust them or add a topic, and we will write one short sentence and a few drill words around them."
-                : `Pick the ${language.name} sounds, contrasts or words you want to work on, and we will write one short sentence and a few drill words that pack them in.`}
+                ? "Your weakest words, sounds and ear contrasts are pre-selected below as sound clues. Adjust them or add a topic, and we will write one natural everyday sentence targeting those same sounds."
+                : `Pick the ${language.name} sounds, contrasts or words you want to work on, and we will write one natural everyday sentence and a few drill words targeting those sounds.`}
             </DialogDescription>
           </DialogHeader>
 
@@ -402,7 +411,7 @@ export function WeakSpotGenerator({
             {profile.weakWords.length > 0 && (
               <fieldset className="space-y-2">
                 <legend className="text-xs font-medium text-muted-foreground">
-                  Weak words from your recordings ({activeWords.length} selected)
+                  Weak words — used to target their sounds ({activeWords.length} selected)
                 </legend>
                 <div className="flex flex-wrap gap-1.5">
                   {profile.weakWords.slice(0, 12).map((w) => {
@@ -440,7 +449,7 @@ export function WeakSpotGenerator({
             {selectableSounds.length > 0 && (
               <fieldset className="space-y-2">
                 <legend className="text-xs font-medium text-muted-foreground">
-                  Sounds & phonemes to pack into the sentence ({activeSounds.length} selected)
+                  Sounds &amp; phonemes to target ({activeSounds.length} selected)
                 </legend>
                 <div className="flex flex-wrap gap-1.5">
                   {selectableSounds.map((s) => {
@@ -545,7 +554,16 @@ export function WeakSpotGenerator({
                 onChange={(e) => setCustomFocus(e.target.value)}
                 aria-describedby={customHintId}
                 placeholder="e.g. words with th and r, or introducing my team at work"
+                disabled={!canFocus}
               />
+              {!canFocus && (
+                <p className="text-xs text-muted-foreground">
+                  Writing your own focus is part of Plus. The weak spots you picked above work on every plan.{" "}
+                  <button type="button" className="underline underline-offset-2" onClick={() => promptUpgrade("customText")}>
+                    See Plus
+                  </button>
+                </p>
+              )}
             </div>
 
             <DialogFooter>

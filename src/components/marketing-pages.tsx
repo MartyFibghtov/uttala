@@ -19,15 +19,19 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { ARTWORKS, ArtworkFrame } from "@/components/artwork";
-import { Orb } from "@/components/orb";
+import { Orb, OrbVisualizationShowcase } from "@/components/orb";
 import { Button } from "@/components/ui/button";
 import { LANGUAGES, unitsFor, type Language } from "@/lib/languages";
 import { MINIMAL_PAIRS } from "@/lib/minimal-pairs";
+import { Breadcrumbs } from "@/components/json-ld";
 import { SITE } from "@/lib/site";
-import { KIND_LABEL, SOUNDS, soundsFor } from "@/lib/sounds";
+import { KIND_LABEL, SOUNDS, soundSlug, soundsFor } from "@/lib/sounds";
 
+/** Existing slugs stay as they are: all current language names are plain ASCII once lowercased. */
 export const languageSlug = (l: Language) =>
   l.name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .replace(/[^a-z]+/g, "-")
     .replace(/^-|-$/g, "");
@@ -40,10 +44,9 @@ export const CONTENT = {
   phrases: LANGUAGES.reduce((s, l) => s + unitsFor(l.code).reduce((n, u) => n + u.phrases.length, 0), 0),
   sounds: SOUNDS.length,
   pairs: Object.values(MINIMAL_PAIRS).reduce((s, p) => s + p.length, 0),
-  soundLevel: LANGUAGES.filter((l) => l.azure).length,
 };
 
-function Hero({ eyebrow, title, children }: { eyebrow: string; title: string; children: ReactNode }) {
+export function Hero({ eyebrow, title, children }: { eyebrow: string; title: string; children: ReactNode }) {
   return (
     <section className="aurora-wash relative overflow-hidden border-b">
       <div aria-hidden className="hero-artwork-mask pointer-events-none absolute inset-0">
@@ -52,7 +55,6 @@ function Hero({ eyebrow, title, children }: { eyebrow: string; title: string; ch
           alt=""
           fill
           sizes="100vw"
-          loading="eager"
           className="object-cover object-right opacity-45 dark:opacity-20 dark:brightness-90"
         />
       </div>
@@ -69,10 +71,10 @@ export function StartCta({ title = "Hear the difference today", body = "Your fir
   return (
     <section className="aurora-wash relative overflow-hidden border-t">
       <div className="mx-auto flex max-w-6xl flex-col items-center px-4 py-16 text-center md:px-8 md:py-20">
-        <div className="flex items-end gap-3" aria-hidden>
-          <Orb palette="sky" size={36} float="slow" />
-          <Orb palette="orchid" size={56} float="fast" />
-          <Orb palette="gold" size={40} float="slow" />
+        <div data-orb-card className="flex items-end gap-5 py-4" aria-hidden>
+          <Orb palette="sky" size={48} float="slow" phaseOffset={0} />
+          <Orb palette="orchid" size={72} float="fast" phaseOffset={1.6} />
+          <Orb palette="gold" size={52} float="slow" phaseOffset={3.1} />
         </div>
         <h2 className="mt-6 text-3xl font-semibold tracking-tight">{title}</h2>
         <p className="mt-2 max-w-md text-muted-foreground">{body}</p>
@@ -83,6 +85,7 @@ export function StartCta({ title = "Hear the difference today", body = "Your fir
           </Link>
         </Button>
         <p className="mt-3 text-sm text-muted-foreground">Free plan, no card needed.</p>
+        <OrbVisualizationShowcase />
       </div>
     </section>
   );
@@ -112,14 +115,14 @@ const FEATURE_GROUPS: {
         icon: AudioLines,
         title: "Rhythm and melody",
         body: "Your pitch line drawn over a native speaker's, word by word, plus scores for fluency, rhythm and intonation.",
-        points: ["Pitch tracked in your browser", "Hesitations and pace against the reference", "One scale at every level"],
+        points: ["Pitch tracked from your recording", "Hesitations and pace against the reference", "One scale at every level"],
         tier: "Plus",
       },
       {
         icon: AudioWaveform,
         title: "Sound-by-sound scoring",
         body: "See which sound inside a word is off, and keep a running list of your weakest sounds.",
-        points: [`Available in ${CONTENT.soundLevel} languages`, "Each sound links to its guide", "Tracked over time"],
+        points: ["Server scores for English (Pro)", "Each sound links to its guide", "Tracked over time"],
         tier: "Pro",
       },
     ],
@@ -313,8 +316,8 @@ export function LanguagesPage() {
     <>
       <Hero eyebrow="Languages" title={`Pronunciation coaching in ${CONTENT.languages} languages`}>
         <p>
-          Every language has the full course, drill list, ear training and rhythm and melody comparison. Sound-by-sound
-          scoring is available in {CONTENT.soundLevel} of them.
+          Every language has the full course, drill list, ear training and rhythm and melody comparison. Pro adds server sound-by-sound
+          scores for English; every language gets the precise sound check.
         </p>
       </Hero>
       <section className="mx-auto max-w-6xl px-4 py-14 md:px-8 md:py-16">
@@ -339,15 +342,50 @@ export function LanguagesPage() {
                 {soundsFor(l.code).length > 3 ? " and more" : ""}
               </p>
               <div className="mt-4 flex items-center justify-between text-xs text-muted-foreground">
-                <span>{l.azure ? "Sound-by-sound scoring" : "Word-level scoring"}</span>
+                <span>Precise sound check</span>
                 <ArrowRight className="size-4 text-foreground transition-transform group-hover:translate-x-0.5" />
               </div>
             </Link>
           ))}
         </div>
       </section>
+      <section id="sound-guides" className="scroll-mt-20 border-y bg-secondary/40">
+        <div className="mx-auto max-w-6xl px-4 py-14 md:px-8 md:py-16">
+          <h2 className="text-3xl font-semibold tracking-tight">Sound guides by language</h2>
+          <p className="mt-2 max-w-2xl text-muted-foreground">
+            How to make the sounds learners get wrong, what usually goes wrong, and words to practise. {CONTENT.sounds}{" "}
+            guides across {CONTENT.languages} languages.
+          </p>
+          <ul className="mt-8 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {LANGUAGES.map((l) => (
+              <li key={l.code}>
+                <Link
+                  href={`/languages/${languageSlug(l)}/sounds`}
+                  className="flex items-center justify-between rounded-xl border bg-card px-4 py-3 text-sm transition-colors hover:border-foreground/40"
+                >
+                  <span className="font-medium">{l.name} sounds</span>
+                  <span className="text-muted-foreground">{soundsFor(l.code).length} guides</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </section>
       <StartCta />
     </>
+  );
+}
+
+/** Extra lead-in for languages where we have written specific guidance for learners. */
+function LanguageIntro({ language }: { language: Language }) {
+  if (language.code !== "sv") return null;
+  return (
+    <p className="mt-3">
+      Learning Swedish in SFI (svenska för invandrare, Swedish for immigrants), at university or on your own? Swedish{" "}
+      <i>uttal</i> (pronunciation) has a few sounds that decide whether you are understood: the <i>sj-ljudet</i> and the{" "}
+      <i>tj-ljudet</i>, retroflex <i>rs</i>, long and short vowels, and the pitch accent that gives the language its melody.
+      Practise them with feedback on your own voice.
+    </p>
   );
 }
 
@@ -361,16 +399,24 @@ export function LanguagePage({ language }: { language: Language }) {
     [String(units.reduce((s, u) => s + u.phrases.length, 0)), "course phrases"],
     [String(sounds.length), "sound guides"],
     [String(pairs.length), "listening pairs"],
-    [language.azure ? "Yes" : "Word level", "sound-by-sound scoring"],
+    [language.azure ? "Pro" : "Free", language.code === "en" ? "sound-by-sound scoring" : "precise sound check"],
   ];
 
   return (
     <>
+      <Breadcrumbs
+        crumbs={[
+          { name: "Home", path: "/" },
+          { name: "Languages", path: "/languages" },
+          { name: language.name, path: `/languages/${languageSlug(language)}` },
+        ]}
+      />
       <Hero eyebrow={`${language.name} · ${language.native}`} title={`Improve your ${language.name} pronunciation`}>
         <p>
           Read {language.name} aloud and see which words a listener would miss, how your rhythm and melody compare with a
           native voice, and exactly what to practise next.
         </p>
+        <LanguageIntro language={language} />
         <div className="mt-6 flex flex-wrap gap-3">
           <Button asChild size="lg" className="rounded-full">
             <Link href="/sign-up">
@@ -396,7 +442,11 @@ export function LanguagePage({ language }: { language: Language }) {
       <section className="mx-auto max-w-6xl px-4 pb-14 md:px-8">
         <h2 className="text-3xl font-semibold tracking-tight">The {language.name} sounds learners struggle with</h2>
         <p className="mt-2 max-w-2xl text-muted-foreground">
-          Each has a guide in the app with practice words you can record and score.
+          Each has a guide with practice words you can record and score.{" "}
+          <Link href={`/languages/${languageSlug(language)}/sounds`} className="font-medium text-foreground underline underline-offset-4">
+            See all {sounds.length} {language.name} sound guides
+          </Link>
+          .
         </p>
         <div className="mt-8 grid gap-4 md:grid-cols-2">
           {shownSounds.map((s) => (
@@ -414,12 +464,22 @@ export function LanguagePage({ language }: { language: Language }) {
               <p className="mt-3 text-sm text-muted-foreground" lang={language.code}>
                 {s.words.join(" · ")}
               </p>
+              <Link
+                href={`/languages/${languageSlug(language)}/sounds/${soundSlug(s)}`}
+                className="mt-3 inline-block text-sm font-medium underline underline-offset-4"
+              >
+                Full guide
+              </Link>
             </article>
           ))}
         </div>
         {sounds.length > shownSounds.length && (
           <p className="mt-4 text-sm text-muted-foreground">
-            And {sounds.length - shownSounds.length} more in the app&apos;s sound library.
+            And {sounds.length - shownSounds.length} more in the{" "}
+            <Link href={`/languages/${languageSlug(language)}/sounds`} className="underline underline-offset-4">
+              {language.name} sound guide
+            </Link>
+            .
           </p>
         )}
       </section>
@@ -583,7 +643,7 @@ export function MethodPage() {
           {[
             ["Single-sound scores are noisy.", "Even the best published systems agree only moderately with human raters at the level of one sound. Trust the pattern across several recordings more than any single number."],
             ["Recognisers are forgiving.", "Modern speech recognition is trained to understand accented speech, so it lets some real errors through."],
-            ["Sound-by-sound checks depend on the language and your settings.", "English is scored sound by sound on our servers. In every language, the optional precise sound check compares each sound with a native reading on your own device. Without it, other languages are scored word by word. Every result says which check it used, and the app never shows a per-sound number it did not measure."],
+            ["Sound-by-sound checks depend on the language and your settings.", "English is scored sound by sound on our servers. In every language, the optional precise sound check compares each sound with a native reading. It runs on our server; your recording is analysed and not stored. Without it, other languages are scored word by word. Every result says which check it used, and the app never shows a per-sound number it did not measure."],
             ["Melody and rhythm are a guide.", "They are compared with one reference voice, so they count for little in your overall score. Your sounds and words carry three quarters of it."],
             ["Conditions matter.", "A noisy room, a distant microphone or a very short recording all lower accuracy. The app tells you when it could not measure something."],
             ["No tool can promise a native accent.", "What it can do is show you precisely what is still different, and make the practice efficient."],

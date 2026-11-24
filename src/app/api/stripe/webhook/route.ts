@@ -1,6 +1,6 @@
 import type Stripe from "stripe";
 import { ready } from "@/lib/server/auth";
-import { claimEvent, handleEvent, releaseEvent, stripe, stripeEnabled } from "@/lib/server/stripe";
+import { handleEvent, isProcessed, markProcessed, stripe, stripeEnabled } from "@/lib/server/stripe";
 
 /** Stripe calls this whenever a subscription, payment or dispute changes. */
 export async function POST(request: Request) {
@@ -18,13 +18,13 @@ export async function POST(request: Request) {
   }
 
   await ready();
-  if (!(await claimEvent(event.id))) return Response.json({ received: true, duplicate: true });
+  if (await isProcessed(event.id)) return Response.json({ received: true, duplicate: true });
   try {
     await handleEvent(event);
+    await markProcessed(event.id);
   } catch (err) {
-    // Let Stripe retry: forget that we saw this event and report failure.
+    // A non-2xx makes Stripe retry with backoff.
     console.error(`webhook ${event.type} ${event.id} failed`, err);
-    await releaseEvent(event.id);
     return new Response("Handler failed.", { status: 500 });
   }
   return Response.json({ received: true });

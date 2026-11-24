@@ -6,6 +6,7 @@ import {
   AlertCircle,
   ArrowLeftRight,
   AudioWaveform,
+  Check,
   CheckCircle2,
   Gauge,
   Headphones,
@@ -15,10 +16,12 @@ import {
   Mic,
   Pencil,
   RotateCcw,
+  Sparkles,
   Square,
   Trophy,
   User,
   Volume2,
+  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { LiveBars } from "@/components/live-bars";
@@ -28,10 +31,11 @@ import { WordCompareControls } from "@/components/word-compare";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { UpgradeCard, useNudge } from "@/components/pricing";
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 import { useAccount, type UpgradeReason } from "@/hooks/use-account";
-import { MAX_RECORDING_SECONDS, useRecorder } from "@/hooks/use-recorder";
+import { isSilent, MAX_RECORDING_SECONDS, recorderErrorMessage, SILENT_MESSAGE, useRecorder } from "@/hooks/use-recorder";
 import {
   decodeToMono16k,
   encodeWav,
@@ -46,14 +50,16 @@ import {
   type PitchTrack,
 } from "@/lib/audio";
 import { getLanguage, type Phrase } from "@/lib/languages";
-import { LEVELS, type LevelId } from "@/lib/levels";
+import { LEVELS, SCORE_SCALE, type LevelId } from "@/lib/levels";
+import { resetTimeLabel } from "@/lib/plans";
+import { buildReferenceContour } from "@/components/pitch-chart";
 import type { Deduction } from "@/lib/deductions";
 import { compareProsody, fallbackProsody, overallFor } from "@/lib/prosody";
 import { bandFor, DEPTH_NOTE } from "@/lib/score-bands";
-import { preloadRatingModel, rateWithDeductions } from "@/lib/rating";
+import { rateWithDeductions } from "@/lib/rating";
 import { soundForIpa } from "@/lib/sounds";
 import { isShort, SHORT, splitShort, wordCount } from "@/lib/short";
-import { bestKey, recordAttempt, useStore } from "@/lib/store";
+import { bestKey, recordAttempt, useStore, type DrillWordTransition, type Recorded } from "@/lib/store";
 import { timeTokens, tokenize, type Span } from "@/lib/text";
 import type { AssessResult, Attempt, FocusSound, ProsodyResult, TtsResponse, WordResult, WordStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -75,6 +81,36 @@ export class UpgradeNeeded extends Error {
   }
 }
 
+
+/**
+ * Send one recording to /api/assess and return the result. Every failure becomes a message that says what
+ * happened and whether the day's allowance was spent (it never is for a failed analysis).
+ */
+export async function postAssess(form: FormData): Promise<AssessResult> {
+  let res: Response;
+  try {
+    // Never leave the learner on "Analysing…": the server gives up after 60 s, the page after 45 s.
+    res = await fetch("/api/assess", { method: "POST", body: form, signal: AbortSignal.timeout(45_000) });
+  } catch (err) {
+    if (err instanceof DOMException && (err.name === "TimeoutError" || err.name === "AbortError")) {
+      throw new Error("The analysis is taking too long right now. Please try that take again in a moment.");
+    }
+    throw new Error("We could not reach SayClear. Check your connection and try again. Nothing was used from today's allowance.");
+  }
+  const data = (await res.json().catch(() => null)) as (AssessResult & { error?: string; upgrade?: UpgradeReason }) | null;
+  if (data?.upgrade) throw new UpgradeNeeded(data.upgrade);
+  if (res.status === 401) throw new Error("You have been signed out. Sign in again to continue.");
+  if (!res.ok || !data) {
+    throw new Error(
+      data?.error ??
+        (res.status === 413
+          ? "That recording is too long. Keep each take to one short sentence."
+          : "Something went wrong on our side. Nothing was used from today's allowance; please try again."),
+    );
+  }
+  return data;
+}
+
 const references = new Map<string, Promise<Reference>>();
 
 /** Fetch (once) the reference reading with DP-aligned + acoustically refined word timings and pitch contour. */
@@ -84,14 +120,19 @@ export function loadReference(text: string, lang: string, level: LevelId, voiceI
   let pending = references.get(key);
   if (!pending) {
     pending = (async () => {
-      const res = await fetch("/api/tts", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ text: clean, lang, level, voiceId }),
-      });
-      const data = (await res.json()) as TtsResponse & { error?: string; upgrade?: UpgradeReason };
-      if (data.upgrade) throw new UpgradeNeeded(data.upgrade);
-      if (!res.ok) throw new Error(data.error ?? "Could not load the reference audio.");
+      let res: Response;
+      try {
+        res = await fetch("/api/tts", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ text: clean, lang, level, voiceId }),
+        });
+      } catch {
+        throw new Error("We could not reach the reference voice. Check your connection and try again.");
+      }
+      const data = (await res.json().catch(() => null)) as (TtsResponse & { error?: string; upgrade?: UpgradeReason }) | null;
+      if (data?.upgrade) throw new UpgradeNeeded(data.upgrade);
+      if (!res.ok || !data) throw new Error(data?.error ?? "The reference voice is not answering right now. Please try again in a moment.");
       const bytes = Uint8Array.from(atob(data.audio), (c) => c.charCodeAt(0));
       const blob = new Blob([bytes], { type: data.mime });
       const samples = await decodeToMono16k(blob).catch(() => null);
@@ -190,6 +231,11 @@ interface Outcome {
   reference: Reference | null;
   attempt: Attempt;
   personalBest: boolean;
+  previousBest?: number;
+  /** Unclear words that did not fit the drill list on this plan. */
+  leftOut: string[];
+  /** Per-word drill transitions produced by this attempt. */
+  transitions: DrillWordTransition[];
 }
 
 interface Props {
@@ -203,12 +249,25 @@ interface Props {
   onTextChange?: (text: string) => void;
   /** Called when the learner finishes editing, so a long text can be split into short sentences. */
   onEditDone?: (text: string) => void;
-  onResult?: (result: AssessResult, attempt: Attempt) => void;
+  /** Called when recording begins so the parent can pin the active item. */
+  onRecordStart?: () => void;
+  onResult?: (result: AssessResult, attempt: Attempt, recorded: Recorded) => void;
   /** Shown beside the record button once there is a result, e.g. "Next phrase". */
   after?: React.ReactNode;
 }
 
-export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChange, onEditDone, onResult, after }: Props) {
+export function PracticeSession({
+  lang,
+  text,
+  level,
+  voiceId,
+  phrase,
+  onTextChange,
+  onEditDone,
+  onRecordStart,
+  onResult,
+  after,
+}: Props) {
   const { me, noteAnalysis, promptUpgrade } = useAccount();
   const ent = me.entitlements;
   const language = getLanguage(lang);
@@ -235,10 +294,6 @@ export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChan
   }, [outcome?.userUrl]);
 
   useEffect(() => stopPlayback, []);
-  // Fetch the sound model early so it is ready by the first recording (about 240 MB, once).
-  useEffect(() => {
-    preloadRatingModel().catch(() => undefined);
-  }, []);
 
   const fail = useCallback(
     (err: unknown, fallback: string) => {
@@ -254,7 +309,11 @@ export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChan
       try {
         const samples = await decodeToMono16k(blob);
         if (samples.length < SAMPLE_RATE * 0.4) {
-          toast.error("That was too short. Try again.");
+          toast.error("That was too short. Say the whole sentence, then press Stop. This did not use a recording.");
+          return;
+        }
+        if (isSilent(samples)) {
+          toast.error(SILENT_MESSAGE);
           return;
         }
         const wav = encodeWav(samples);
@@ -264,10 +323,7 @@ export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChan
         form.append("lang", lang);
         form.append("level", level);
         const refPromise = live ? loadReference(target, lang, level, voiceId).catch(() => null) : Promise.resolve(null);
-        const res = await fetch("/api/assess", { method: "POST", body: form });
-        let data = (await res.json()) as AssessResult & { error?: string; upgrade?: UpgradeReason };
-        if (data.upgrade) throw new UpgradeNeeded(data.upgrade);
-        if (!res.ok) throw new Error(data.error ?? "Assessment failed.");
+        let data = await postAssess(form);
         noteAnalysis();
 
         // Do not block the analysis result if reference TTS is still generating on a cold cache.
@@ -276,13 +332,13 @@ export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChan
           new Promise<null>((resolve) => setTimeout(() => resolve(null), 200)),
         ]);
 
-        // Main rating: score by deduction, from the sound model running on this device (src/lib/rating.ts).
+        // Main rating: score by deduction, from the sound model running on our server (src/lib/rating.ts).
         // It runs before the attempt is saved so the stored score is the deduction score.
         if (live) {
           reference ??= await Promise.race([refPromise, new Promise<null>((resolve) => setTimeout(() => resolve(null), 15000))]);
         }
         const rated = await rateWithDeductions(samples, data, reference, lang);
-        data = { ...rated.result, error: data.error, upgrade: data.upgrade };
+        data = rated.result;
 
         // Refine user word timings against the actual 16 kHz waveform energy envelope.
         const refinedUserSpans = refineSpansWithAudio(
@@ -342,6 +398,9 @@ export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChan
           reference,
           attempt: recorded.attempt,
           personalBest: recorded.personalBest,
+          previousBest: recorded.previousBest,
+          leftOut: recorded.leftOut,
+          transitions: recorded.transitions,
         });
         if (!reference && live) {
           void refPromise.then((lateRef) => {
@@ -363,7 +422,7 @@ export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChan
             });
           });
         }
-        onResult?.(data, recorded.attempt);
+        onResult?.(data, recorded.attempt, recorded);
       } catch (err) {
         fail(err, "Something went wrong.");
       } finally {
@@ -385,6 +444,7 @@ export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChan
       promptUpgrade("limit");
       return;
     }
+    onRecordStart?.();
     stopPlayback();
     // Warm reference audio while the user is speaking so it's ready when recording stops.
     if (live && target) {
@@ -392,8 +452,8 @@ export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChan
     }
     try {
       await recorder.start();
-    } catch {
-      toast.error("Microphone access is needed to record. Allow it in your browser and try again.");
+    } catch (err) {
+      toast.error(recorderErrorMessage(err));
     }
   };
 
@@ -496,11 +556,29 @@ export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChan
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
       <div className="min-w-0 space-y-6">
         <Card className="gap-0 overflow-hidden py-0">
+          {shown && (
+            <AttemptVerdictBanner
+              key={shown.attempt.id}
+              outcome={shown}
+              cap={ent.maxDrillWords}
+            />
+          )}
           <CardContent className="p-0">
             <div className={cn("p-5 md:p-6", onTextChange ? "min-h-52" : "min-h-28")}>
-              <div dir={language.rtl ? "rtl" : "ltr"} lang={lang}>
+              <div
+                key={`${lang}:${text}`}
+                dir={language.rtl ? "rtl" : "ltr"}
+                lang={lang}
+                className="prompt-stage-enter"
+              >
                 {shown ? (
-                  <ScoredText text={shown.text} words={shown.result.words} selected={selected} onSelect={setSelected} />
+                  <ScoredText
+                    text={shown.text}
+                    words={shown.result.words}
+                    selected={selected}
+                    onSelect={setSelected}
+                    attemptId={shown.attempt.id}
+                  />
                 ) : editing && onTextChange ? (
                   <Textarea
                     autoFocus
@@ -651,6 +729,16 @@ export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChan
             )}
           </div>
         )}
+        {shown && shown.leftOut.length > 0 && ent.maxDrillWords !== null && (
+          <DrillFullCard words={shown.leftOut} cap={ent.maxDrillWords} />
+        )}
+        {outOfRecordings && !recorder.recording && (
+          <p className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
+            Today&apos;s {me.usage.limit} recordings are used. They come back at {resetTimeLabel()} (midnight UTC).
+            Listening, ear training, the sound library and your drill list stay open, and everything you already
+            recorded is saved.
+          </p>
+        )}
         {shown?.result.demo && (
           <p className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
             Demo mode: these scores are simulated because the speech engine is not connected.
@@ -675,7 +763,12 @@ export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChan
               {shown.prosody ? (
                 <PitchChart contour={shown.prosody.contour} words={shown.result.words.map((w) => w.text)} />
               ) : (
-                <LockedMelody onUnlock={() => promptUpgrade("prosody")} />
+                <LockedMelody
+                  reference={shown.reference}
+                  words={shown.result.words.map((w) => w.text)}
+                  good={shown.attempt.overall >= 70}
+                  onUnlock={() => promptUpgrade("prosody")}
+                />
               )}
             </CardContent>
           </Card>
@@ -724,6 +817,238 @@ export function PracticeSession({ lang, text, level, voiceId, phrase, onTextChan
         )}
       </div>
     </div>
+  );
+}
+
+function AttemptVerdictBanner({ outcome, cap }: { outcome: Outcome; cap: number | null }) {
+  const words = outcome.result.words;
+  const overall = overallFor(outcome.result, outcome.prosody);
+  const single = words.length === 1 ? words[0] : null;
+  const badWords = words.filter((w) => w.status !== "ok");
+  const mispronouncedCount = words.filter((w) => w.status === "mispronounced" || w.status === "omitted").length;
+
+  const primaryTransition = single
+    ? outcome.transitions.find(
+        (t) =>
+          t.status === "mastered" ||
+          t.status === "resting" ||
+          t.status === "streak-up" ||
+          t.status === "streak-reset" ||
+          t.status === "resting-early",
+      )
+    : undefined;
+
+  const addedToDrills = outcome.transitions.filter((t) => t.status === "added").map((t) => t.text);
+  const cappedByLimit = outcome.transitions.filter((t) => t.status === "capped").map((t) => t.text);
+  const masteredNow = outcome.transitions.filter((t) => t.status === "mastered").map((t) => t.text);
+  const restingNow = outcome.transitions.filter((t) => t.status === "resting").map((t) => t.text);
+
+  let kind: "success" | "almost" | "failure";
+  if (single) {
+    kind =
+      single.score >= SCORE_SCALE.clear
+        ? "success"
+        : single.score >= SCORE_SCALE.unclear
+          ? "almost"
+          : "failure";
+  } else {
+    kind =
+      overall >= SCORE_SCALE.clear && badWords.length === 0
+        ? "success"
+        : overall >= 65 && mispronouncedCount === 0
+          ? "almost"
+          : overall >= 72 && badWords.length <= 1
+            ? "almost"
+            : "failure";
+  }
+
+  let headline = "";
+  let detail = "";
+
+  if (single && primaryTransition) {
+    const t = primaryTransition;
+    if (t.status === "mastered") {
+      headline = `Mastered! “${t.text}” passed its final check (${single.score}/100)`;
+      detail = "This word graduated to your Mastered list. Advance when you are ready.";
+    } else if (t.status === "resting") {
+      headline =
+        t.checkIndex === 1
+          ? `3 of 3 clear! “${t.text}” is locked in (${single.score}/100)`
+          : `Spaced check ${(t.checkIndex ?? 2) - 1} passed! (${single.score}/100)`;
+      detail = `Now resting for ${t.dueDays ?? 2} days before its next check. Review your take or move to the next word.`;
+    } else if (t.status === "streak-up") {
+      const left = Math.max(1, 3 - t.newStreak);
+      headline = `Clear take! Streak ${t.newStreak} of 3 in a row (${single.score}/100)`;
+      detail = `Say “${t.text}” clearly ${left} more time${left === 1 ? "" : "s"} in a row to send it to rest.`;
+    } else if (t.status === "resting-early") {
+      headline = `Clear take! (${single.score}/100)`;
+      detail = `Still resting until its scheduled check in ${t.dueDays ?? 1} day${t.dueDays === 1 ? "" : "s"}.`;
+    } else if (t.status === "streak-reset") {
+      headline =
+        t.prevStreak > 0
+          ? `Unclear take (${single.score}/100) — streak reset from ${t.prevStreak} of 3 to 0`
+          : `Not clear yet (${single.score}/100) — need ${SCORE_SCALE.clear}+ for take 1 of 3`;
+      detail = single.heard
+        ? `Heard as “${single.heard}”. Listen to the target below and try again.`
+        : (single.fix ?? "Listen to the reference once, then record again.");
+    }
+  } else if (single) {
+    if (kind === "success") {
+      headline = `Clear! “${single.text}” came through cleanly (${single.score}/100)`;
+      detail =
+        outcome.personalBest && outcome.previousBest !== undefined
+          ? `Up +${overall - outcome.previousBest} pts from your previous best.`
+          : "Sounded clear. Try it again or continue to the next step.";
+    } else if (kind === "almost") {
+      headline = `Almost there on “${single.text}” (${single.score}/100)`;
+      detail =
+        single.fix ??
+        (single.heard
+          ? `Heard as “${single.heard}”. Aim for ${SCORE_SCALE.clear}+ to mark this word clear.`
+          : `Score ${SCORE_SCALE.clear}+ to mark this word clear. Listen and try once more.`);
+    } else {
+      headline = `“${single.text}” needs another try (${single.score}/100)`;
+      detail = single.heard
+        ? `Heard as “${single.heard}”. Compare your audio with the reference below, then try again.`
+        : (single.diagnosis ?? "Listen slowly to the reference below, then record again.");
+    }
+  } else {
+    if (kind === "success") {
+      headline = `Clean take! Every word came through clearly (${overall}/100)`;
+      detail =
+        outcome.personalBest && outcome.previousBest !== undefined
+          ? `New personal best (+${overall - outcome.previousBest} pts).`
+          : "All words were clear. Review any word below or continue when you are ready.";
+    } else if (kind === "almost") {
+      headline = `Good take (${overall}/100) — ${badWords.length} word${badWords.length === 1 ? "" : "s"} to polish`;
+      detail = `Tap ${badWords.length === 1 ? `“${badWords[0].text}”` : "the highlighted words"} below to compare your recording with the reference.`;
+    } else {
+      headline = `Needs another take (${overall}/100) — ${badWords.length} word${badWords.length === 1 ? "" : "s"} unclear`;
+      detail = `Tap the highlighted words below to hear what went wrong, or practise the hard words one at a time.`;
+    }
+  }
+
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className={cn(
+        "transition-entry border-b px-5 py-3.5 text-sm",
+        kind === "success" &&
+          "border-emerald-200 bg-emerald-50/90 text-emerald-950 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-100",
+        kind === "almost" &&
+          "border-amber-200 bg-amber-50/90 text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-100",
+        kind === "failure" &&
+          "border-red-200 bg-red-50/90 text-red-950 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-100",
+      )}
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-start gap-2.5">
+          <span
+            className={cn(
+              "mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full",
+              kind === "success" && "verdict-pop bg-emerald-600 text-white",
+              kind === "almost" && "verdict-pop bg-amber-500 text-white",
+              kind === "failure" && "verdict-shake bg-red-600 text-white",
+            )}
+          >
+            {kind === "success" ? (
+              <Check className="size-3.5 stroke-[2.5]" />
+            ) : kind === "almost" ? (
+              <AlertCircle className="size-3.5" />
+            ) : (
+              <XCircle className="size-3.5" />
+            )}
+          </span>
+          <div className="space-y-1">
+            <p className="font-semibold leading-snug">{headline}</p>
+            <p className="text-xs opacity-85">{detail}</p>
+            {(addedToDrills.length > 0 || cappedByLimit.length > 0 || masteredNow.length > 0 || restingNow.length > 0) && (
+              <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                {masteredNow.length > 0 && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-600/15 px-2 py-0.5 text-[11px] font-medium">
+                    <Sparkles className="size-3" />
+                    Mastered: {masteredNow.map((w) => `“${w}”`).join(", ")}
+                  </span>
+                )}
+                {restingNow.length > 0 && !single && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-600/15 px-2 py-0.5 text-[11px] font-medium">
+                    <Check className="size-3" />
+                    3/3 clear → resting: {restingNow.map((w) => `“${w}”`).join(", ")}
+                  </span>
+                )}
+                {addedToDrills.length > 0 && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-background/80 px-2 py-0.5 text-[11px] font-medium text-foreground">
+                    Added to Drills: {addedToDrills.slice(0, 3).map((w) => `“${w}”`).join(", ")}
+                    {addedToDrills.length > 3 ? ` +${addedToDrills.length - 3}` : ""}
+                  </span>
+                )}
+                {cappedByLimit.length > 0 && (
+                  <Link
+                    href="/drills"
+                    className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-background/85 px-2 py-0.5 text-[11px] font-medium text-foreground underline-offset-2 hover:underline"
+                  >
+                    {cap ?? 5}-word drill limit full: {cappedByLimit.slice(0, 2).map((w) => `“${w}”`).join(", ")}
+                    {cappedByLimit.length > 2 ? ` +${cappedByLimit.length - 2}` : ""} in waiting list →
+                  </Link>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5 text-xs font-medium">
+          {outcome.attempt.xp !== undefined && outcome.attempt.xp > 0 && (
+            <span className="rounded-full bg-background/80 px-2.5 py-0.5 tabular-nums text-foreground">
+              +{outcome.attempt.xp} pts
+            </span>
+          )}
+          {outcome.personalBest && (
+            <span className="verdict-pop inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2.5 py-0.5 text-white">
+              <Trophy className="size-3" />
+              New best
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DrillFullCard({ words, cap }: { words: string[]; cap: number }) {
+  const { me } = useAccount();
+  const nudge = useNudge("drills", me.billing);
+  const shownWords = words.slice(0, 4).map((w) => `“${w}”`).join(", ");
+  if (!nudge.visible || !me.billing) {
+    return (
+      <div className="transition-entry flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300/70 bg-amber-50/60 px-4 py-3 text-sm dark:border-amber-900/60 dark:bg-amber-950/25">
+        <p className="text-muted-foreground">
+          <span className="font-medium text-foreground">All {cap} drill slots are in use.</span> Your existing {cap} drill
+          words were kept safe, and {shownWords}
+          {words.length > 4 ? ` and ${words.length - 4} more` : ""} moved to your waiting list so nothing disappears.
+        </p>
+        <Button asChild size="sm" variant="outline" className="rounded-full">
+          <Link href="/drills">Manage {cap} slots in Drills</Link>
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <UpgradeCard
+      title={`Your drill list is full at ${cap} words`}
+      currentPlan={me.plan}
+      trialAvailable={me.trialAvailable}
+      onDismiss={nudge.dismiss}
+    >
+      <p>
+        Your existing {cap} drill words were kept safe, and these unclear words from this take moved to your waiting list:{" "}
+        <span className="font-medium text-foreground">{shownWords}</span>
+        {words.length > 4 ? ` and ${words.length - 4} more` : ""}. You can swap them into a slot under{" "}
+        <Link href="/drills" className="font-medium text-foreground underline underline-offset-4">
+          Drills
+        </Link>
+        , or unlock Plus for an unlimited drill list.
+      </p>
+    </UpgradeCard>
   );
 }
 
@@ -850,29 +1175,35 @@ function ScoredText({
   words,
   selected,
   onSelect,
+  attemptId,
 }: {
   text: string;
   words: WordResult[];
   selected: number | null;
   onSelect: (i: number) => void;
+  attemptId?: string;
 }) {
   const parts: React.ReactNode[] = [];
   let cursor = 0;
+  const single = words.length === 1;
   for (const w of words) {
     if (w.from > cursor) parts.push(text.slice(cursor, w.from));
     parts.push(
       <button
-        key={w.index}
+        key={`${attemptId ?? "take"}-${w.index}`}
         type="button"
         onClick={() => onSelect(w.index)}
         aria-label={`${w.text}: ${STATUS_LABEL[w.status]}, ${w.score} out of 100`}
         className={cn(
-          "rounded-md px-0.5 transition-colors",
+          "inline-flex items-center gap-1 rounded-md px-1 transition-colors",
           STATUS_STYLE[w.status],
+          single && w.status === "ok" && "bg-emerald-100/80 text-emerald-950 dark:bg-emerald-950/50 dark:text-emerald-200",
+          (w.status === "mispronounced" || w.status === "omitted") && "verdict-shake",
           selected === w.index && "ring-2 ring-foreground ring-offset-1",
         )}
       >
-        {text.slice(w.from, w.to)}
+        <span>{text.slice(w.from, w.to)}</span>
+        {single && w.status === "ok" && <Check className="verdict-pop size-5 text-emerald-600" />}
       </button>,
     );
     cursor = w.to;
@@ -901,30 +1232,52 @@ function Legend() {
   );
 }
 
-function LockedMelody({ onUnlock }: { onUnlock: () => void }) {
+/**
+ * Free plan: the native melody of this very sentence is shown for free, and Plus would lay the learner's own
+ * line over it. After a good take the full explanation shows once a day; otherwise one quiet line.
+ */
+function LockedMelody({
+  reference,
+  words,
+  good,
+  onUnlock,
+}: {
+  reference: Reference | null;
+  words: string[];
+  good: boolean;
+  onUnlock: () => void;
+}) {
+  const { me } = useAccount();
+  const contour = useMemo(() => (reference ? buildReferenceContour(reference.spans, reference.pitch) : []), [reference]);
+  const nudge = useNudge("melody", good);
   return (
-    <div className="relative overflow-hidden rounded-lg">
-      <svg viewBox="0 0 600 120" className="h-28 w-full blur-[3px]" aria-hidden>
-        <path
-          d="M0,70 C60,20 110,90 170,60 S270,20 330,70 420,100 480,50 560,40 600,65"
-          fill="none"
-          strokeWidth={3}
-          className="stroke-muted-foreground/40"
-        />
-        <path
-          d="M0,80 C70,60 100,40 170,75 S280,60 330,50 430,80 480,70 550,30 600,55"
-          fill="none"
-          strokeWidth={3}
-          className="stroke-foreground/70"
-        />
-      </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/50 text-center">
-        <p className="text-sm font-medium">See how your melody compares with a native voice</p>
-        <Button size="sm" className="rounded-full" onClick={onUnlock}>
-          <Lock />
-          Unlock with Plus
-        </Button>
-      </div>
+    <div className="space-y-3">
+      {contour.length > 0 ? (
+        <PitchChart contour={contour} words={words} />
+      ) : (
+        <p className="text-sm text-muted-foreground">The native melody for this sentence is still loading.</p>
+      )}
+      {nudge.visible ? (
+        <UpgradeCard
+          title="Nice take. Here is what Plus would add to this chart"
+          currentPlan={me.plan}
+          trialAvailable={me.trialAvailable}
+          onDismiss={nudge.dismiss}
+        >
+          <p>
+            The line above is how a native speaker moves their voice through this sentence. With Plus, your own line is
+            drawn on top of it word by word, with a rhythm score, so you can see where your voice goes flat or
+            rushes. Your sounds and words are scored in full on the free plan either way.
+          </p>
+        </UpgradeCard>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          Plus draws your own melody on top of this one.{" "}
+          <button type="button" onClick={onUnlock} className="font-medium underline underline-offset-4">
+            See what it adds
+          </button>
+        </p>
+      )}
     </div>
   );
 }

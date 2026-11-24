@@ -244,18 +244,24 @@ export async function deleteCommunityData(userId: string): Promise<void> {
 const REMINDER_GAP = 3 * DAY_MS;
 const REMINDER_BATCH = 200;
 
-function unsubscribeToken(userId: string): string {
-  const secret = process.env.BETTER_AUTH_SECRET ?? "";
+/** Null when no signing secret is configured: links are then neither made nor accepted. */
+function unsubscribeToken(userId: string): string | null {
+  const secret = process.env.BETTER_AUTH_SECRET;
+  if (!secret) return null;
   return createHmac("sha256", secret).update(`unsubscribe:${userId}`).digest("hex");
 }
 
-export const unsubscribeUrl = (userId: string) =>
-  `${SITE.url}/api/unsubscribe?u=${encodeURIComponent(userId)}&t=${unsubscribeToken(userId)}`;
+export const unsubscribeUrl = (userId: string): string | null => {
+  const token = unsubscribeToken(userId);
+  return token ? `${SITE.url}/api/unsubscribe?u=${encodeURIComponent(userId)}&t=${token}` : null;
+};
 
 export async function unsubscribe(userId: string, token: string): Promise<boolean> {
-  const expected = Buffer.from(unsubscribeToken(userId));
+  const signed = unsubscribeToken(userId);
+  if (!signed) return false;
+  const expected = Buffer.from(signed);
   const given = Buffer.from(token);
-  if (!process.env.BETTER_AUTH_SECRET || expected.length !== given.length || !timingSafeEqual(expected, given)) return false;
+  if (expected.length !== given.length || !timingSafeEqual(expected, given)) return false;
   await db().execute({ sql: "UPDATE community SET reminders = 0, updated_at = ? WHERE user_id = ?", args: [Date.now(), userId] });
   return true;
 }
@@ -274,17 +280,24 @@ export async function sendReminders(now = Date.now()): Promise<{ sent: number }>
   );
   let sent = 0;
   for (const r of rows) {
+    const link = unsubscribeUrl(r.user_id);
+    if (!link) {
+      console.error("Reminders skipped: BETTER_AUTH_SECRET is not set, so no unsubscribe link can be signed.");
+      break;
+    }
     const days = Math.round((new Date(utcDay(now)).getTime() - new Date(r.last_day).getTime()) / DAY_MS);
-    await sendEmail({
+    const delivered = await sendEmail({
       to: r.email,
+      headers: { "List-Unsubscribe": `<${link}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" },
       subject: "Two minutes for your pronunciation?",
       lines: [
         `${r.name?.trim() ? `Hi ${r.name.trim().split(" ")[0]}, it` : "It"} has been ${days} days since your last recording.`,
         "Your drill words are waiting, and one short phrase is enough to keep the habit alive.",
-        `You asked for these reminders. To stop them, open ${unsubscribeUrl(r.user_id)}`,
+        `You asked for these reminders. To stop them, open ${link}`,
       ],
       action: { label: "Practise now", url: `${SITE.url}/home` },
     });
+    if (!delivered) continue; // try again on the next run
     await db().execute({ sql: "UPDATE community SET reminded_at = ? WHERE user_id = ?", args: [now, r.user_id] });
     sent++;
   }

@@ -74,7 +74,8 @@ export async function assessWithAzure(
     ...(isEnUs ? { EnableProsodyAssessment: true, NBestPhonemeCount: 3 } : {}),
   };
   const url =
-    `https://${region()}.stt.speech.microsoft.com/speech/recognition/conversation/cognitiveservices/v1` +
+    (process.env.AZURE_SPEECH_ENDPOINT ?? `https://${region()}.stt.speech.microsoft.com`) +
+    `/speech/recognition/conversation/cognitiveservices/v1` +
     `?language=${encodeURIComponent(locale)}&format=detailed`;
   const res = await fetch(url, {
     method: "POST",

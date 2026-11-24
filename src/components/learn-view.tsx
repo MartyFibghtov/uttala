@@ -24,7 +24,7 @@ const MORE = [
   {
     href: "/practice",
     icon: Mic,
-    title: "Short sentences and tongue twisters",
+    title: "Short spoken sentences",
     body: "Drill the hard words on their own, then say the whole sentence. Or paste what you actually need to say.",
   },
   {
@@ -195,8 +195,8 @@ export function UnitView({ unitId }: { unitId: string }) {
       </PageHeader>
 
       {done && (
-        <div className="mb-6 flex flex-wrap items-center gap-3 rounded-xl border bg-emerald-50 px-4 py-3 text-emerald-950">
-          <PartyPopper className="size-5 shrink-0" />
+        <div className="transition-entry mb-6 flex flex-wrap items-center gap-3 rounded-xl border bg-emerald-50 px-4 py-3 text-emerald-950 dark:border-emerald-900/60 dark:bg-emerald-950/35 dark:text-emerald-100">
+          <PartyPopper className="verdict-pop size-5 shrink-0" />
           <p className="min-w-0 flex-1 text-sm">
             <span className="font-medium">Unit cleared.</span> {current.stars} of {current.total * 3} stars. Go again for
             three stars on every phrase, or move on.
@@ -215,6 +215,7 @@ export function UnitView({ unitId }: { unitId: string }) {
       <div className="mb-4 flex gap-2 overflow-x-auto pb-1" role="tablist" aria-label="Phrases in this unit">
         {current.unit.phrases.map((p, i) => {
           const score = current.scores[i];
+          const clearedPhrase = score !== undefined && score >= PHRASE_CLEAR;
           return (
             <button
               key={p.text}
@@ -224,11 +225,17 @@ export function UnitView({ unitId }: { unitId: string }) {
               onClick={() => select(i)}
               className={cn(
                 "flex w-44 shrink-0 flex-col gap-1.5 rounded-xl border bg-card px-3 py-2.5 text-left transition-colors hover:bg-secondary sm:w-auto sm:flex-1",
+                clearedPhrase &&
+                  i !== index &&
+                  "border-emerald-500/35 bg-emerald-50/40 dark:border-emerald-800/50 dark:bg-emerald-950/20",
                 i === index && "border-foreground bg-secondary",
               )}
             >
               <span className="flex items-center justify-between gap-2">
-                <span className="text-xs text-muted-foreground">Phrase {i + 1}</span>
+                <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                  {clearedPhrase && <Check className="verdict-pop size-3 text-emerald-600" />}
+                  Phrase {i + 1}
+                </span>
                 {score !== undefined && <span className={cn("text-xs font-semibold tabular-nums", scoreColor(score))}>{score}</span>}
               </span>
               <span className="line-clamp-1 text-sm font-medium" lang={lang}>
@@ -246,6 +253,8 @@ export function UnitView({ unitId }: { unitId: string }) {
         text={phrase.text}
         phrase={phrase}
         voiceId={voiceId}
+        onRecordStart={() => select(index)}
+        onResult={() => select(index)}
         after={
           !isLast ? (
             <Button variant="outline" className="rounded-full" onClick={() => select(index + 1)}>

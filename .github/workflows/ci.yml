@@ -1,0 +1,138 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Mirrors scripts/fetch-model.mjs / src/lib/server/phone-model.ts (cache key below).
+  SOUND_MODEL_ID: onnx-community/wav2vec2-lv-60-espeak-cv-ft-ONNX
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+
+  e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CI: "true"
+      E2E_CHANNEL: chromium
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      # The e2e server reads the phone model from .data/models (SOUND_MODEL_DIR in playwright.config.ts).
+      - name: Cache sound model
+        id: model-cache
+        uses: actions/cache@v4
+        with:
+          path: .data/models
+          key: sound-model-${{ env.SOUND_MODEL_ID }}-${{ hashFiles('scripts/fetch-model.mjs') }}
+      - name: Download sound model
+        if: steps.model-cache.outputs.cache-hit != 'true'
+        run: node scripts/fetch-model.mjs .data/models
+      # playwright.config.ts runs `next build` itself and starts the mock + standalone servers.
+      - run: pnpm e2e
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            e2e/.report
+            e2e/.results
+          if-no-files-found: ignore
+          retention-days: 7
+
+  docker:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      IMAGE: sayclear:ci
+      SITE_URL: http://localhost:3000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build image (linux/amd64)
+        run: |
+          docker buildx build \
+            --platform linux/amd64 \
+            --build-arg NEXT_PUBLIC_SITE_URL="$SITE_URL" \
+            --build-arg NEXT_PUBLIC_COMPANY_NAME="SayClear CI" \
+            --build-arg NEXT_PUBLIC_CONTACT_EMAIL="ci@example.test" \
+            --cache-from type=gha \
+            --cache-to type=gha,mode=max \
+            --load \
+            -t "$IMAGE" .
+      - name: Image size
+        run: |
+          docker image inspect "$IMAGE" --format 'image size: {{.Size}} bytes'
+          docker images "$IMAGE"
+      - name: Run container
+        run: |
+          VOL="$(mktemp -d)"
+          docker run -d --name sayclear \
+            -p 3000:3000 \
+            -v "$VOL:/data" \
+            -e BETTER_AUTH_SECRET=ci-secret-0123456789abcdef0123456789abcdef \
+            -e BETTER_AUTH_URL="$SITE_URL" \
+            -e NEXT_PUBLIC_SITE_URL="$SITE_URL" \
+            -e DATA_DIR=/data \
+            -e PORT=3000 \
+            -e ELEVENLABS_API_KEY=xi_fake \
+            "$IMAGE"
+      - name: Wait for /api/health
+        run: |
+          for i in $(seq 1 60); do
+            code="$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/api/health || true)"
+            if [ "$code" = "200" ]; then echo "health 200 after ~$((i * 2))s"; exit 0; fi
+            if [ -z "$(docker ps -q -f name=sayclear)" ]; then echo "container exited"; docker logs sayclear; exit 1; fi
+            sleep 2
+          done
+          echo "health check timed out"; docker logs sayclear; exit 1
+      - name: Sound model loaded
+        run: |
+          for i in $(seq 1 30); do
+            if docker logs sayclear 2>&1 | grep -q '\[sound-model\] ready in'; then break; fi
+            sleep 2
+          done
+          docker logs sayclear 2>&1 | tee /tmp/container.log
+          grep -q '\[sound-model\] ready in' /tmp/container.log
+          if grep -q 'Sound model failed to load' /tmp/container.log; then exit 1; fi
+      # Native bindings: pnpm keeps them out of /app/node_modules' top level, so test them through the app.
+      # onnxruntime-node is proven by "[sound-model] ready" above; libsql by the database query in /api/health.
+      - name: Database works inside the image
+        run: |
+          body="$(curl -s http://localhost:3000/api/health)"
+          echo "$body"
+          [ "$body" = '{"ok":true}' ]
+      - name: GET / returns 200
+        run: |
+          code="$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/)"
+          echo "GET / -> $code"
+          [ "$code" = "200" ]
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs sayclear || true

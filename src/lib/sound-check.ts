@@ -1,18 +1,15 @@
 /**
- * Precise sound check, run on the learner's device.
+ * Precise sound check, run on the server.
  *
- * Downloads a multilingual phone recogniser once (about 240 MB, then cached by the browser) and
- * compares the learner's sounds with the native reference of the same text. Audio never leaves the
- * device for this step. See src/lib/phone-compare.ts for the comparison itself.
+ * A multilingual phone recogniser (about 240 MB, loaded once on the server) compares the learner's sounds
+ * with the native reference of the same text. Nothing is downloaded by the learner. See
+ * src/lib/phone-compare.ts for the comparison itself.
  */
 import { learnerWordSpans, soundOwners, type SoundEvidence } from "./deductions";
 import { nonPhoneIds, strictFeatures, type Logits, type StrictFeatures } from "./gop";
 import { statusFor } from "./levels";
 import { compareSounds, decodeCtc, FRAME_SECONDS, type SoundCheck } from "./phone-compare";
 import type { AssessResult } from "./types";
-
-/** Rough download size, shown before the learner turns the check on. */
-export const SOUND_CHECK_DOWNLOAD_MB = 240;
 
 interface Recognizer {
   phones: (samples: Float32Array) => Promise<ReturnType<typeof decodeCtc>>;
@@ -23,51 +20,47 @@ interface Recognizer {
 
 let loading: Promise<Recognizer> | null = null;
 
-/**
- * The model runs in a Web Worker (public/sound-model-worker.js) so inference never freezes the page.
- * Each request carries an id; the worker answers with progress, a result or an error for that id.
- */
-function startWorker(onProgress?: (fraction: number) => void): Promise<Recognizer> {
-  const worker = new Worker("/sound-model-worker.js", { type: "module" });
-  let nextId = 1;
-  const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void; progress?: (f: number) => void }>();
-  const failAll = (err: Error) => {
-    for (const p of pending.values()) p.reject(err);
-    pending.clear();
-    worker.terminate();
-    loading = null; // a crashed worker is not reused; the next call starts a new one
-  };
-  worker.onmessage = (e: MessageEvent<{ id: number; progress?: number; result?: unknown; error?: string }>) => {
-    const p = pending.get(e.data.id);
-    if (!p) return;
-    if (e.data.progress !== undefined) return p.progress?.(e.data.progress);
-    pending.delete(e.data.id);
-    if (e.data.error !== undefined) p.reject(new Error(e.data.error));
-    else p.resolve(e.data.result);
-  };
-  worker.onerror = (e) => failAll(new Error(e.message || "The sound model stopped."));
-  const call = <T>(msg: Record<string, unknown>, progress?: (f: number) => void) =>
-    new Promise<T>((resolve, reject) => {
-      const id = nextId++;
-      pending.set(id, { resolve: resolve as (v: unknown) => void, reject, progress });
-      worker.postMessage({ ...msg, id });
-    });
-  return call<{ tokens: string[] }>({ type: "load" }, onProgress).then(({ tokens }) => {
-    const logits = (samples: Float32Array) => call<Logits>({ type: "logits", samples });
-    return {
-      tokens,
-      logits,
-      phones: async (samples: Float32Array) => {
-        const l = await logits(samples);
-        return decodeCtc(l.data, l.frames, l.vocab, tokens);
-      },
-    };
-  });
+/** Float32 logits arrive as base64 text from /api/sound-check. */
+function fromBase64(b64: string): Float32Array {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Float32Array(bytes.buffer);
 }
 
-/** Load the recogniser (downloads on first use). Progress is reported from 0 to 1. */
+/**
+ * The model runs on the server (src/lib/server/phone-model.ts). Loading is a warm-up request that returns the
+ * sound inventory; each recording is sent as raw 16 kHz Float32 samples and the per-frame scores come back.
+ */
+async function startRemote(onProgress?: (fraction: number) => void): Promise<Recognizer> {
+  const res = await fetch("/api/sound-check", { credentials: "same-origin" });
+  if (!res.ok) throw new Error("The sound model is not available.");
+  const { tokens } = (await res.json()) as { tokens: string[] };
+  onProgress?.(1);
+  const logits = async (samples: Float32Array): Promise<Logits> => {
+    const r = await fetch("/api/sound-check", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: new Blob([samples as BlobPart]),
+    });
+    const j = (await r.json().catch(() => ({}))) as { error?: string; data?: string; frames?: number; vocab?: number };
+    if (!r.ok || !j.data) throw new Error(j.error ?? "The sound check failed.");
+    return { data: fromBase64(j.data), frames: j.frames!, vocab: j.vocab! };
+  };
+  return {
+    tokens,
+    logits,
+    phones: async (samples: Float32Array) => {
+      const l = await logits(samples);
+      return decodeCtc(l.data, l.frames, l.vocab, tokens);
+    },
+  };
+}
+
+/** Connect to the server-side recogniser (a warm-up request). Progress is reported from 0 to 1. */
 export function loadSoundCheck(onProgress?: (fraction: number) => void): Promise<Recognizer> {
-  loading ??= startWorker(onProgress).catch((err) => {
+  loading ??= startRemote(onProgress).catch((err) => {
     loading = null;
     throw err;
   });

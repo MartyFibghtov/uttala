@@ -21,6 +21,8 @@ export interface Sound {
   watch: string;
   /** Practice words, easiest first. */
   words: string[];
+  /** Further detail shown on the public sound guide pages: spelling, dialect and contrast notes. */
+  extra?: string[];
 }
 
 type Row = [slug: string, symbol: string, name: string, kind: SoundKind, how: string, watch: string, words: string[]];
@@ -46,7 +48,7 @@ const ROWS: Record<string, Row[]> = {
     ["aw", "ɔː", "Open o", v, "Jaw open, lips rounded, held long.", "Mixing it with the “oh” diphthong: “caught” is not “coat”.", ["law", "thought", "call", "door", "walk"]],
     ["ei", "eɪ", "Long a", v, "Start at “e” and glide up towards “ee”. Two positions in one syllable.", "Saying a single flat “e”, so “late” sounds like “let”.", ["day", "late", "rain", "great", "eight"]],
     ["ou", "oʊ", "Long o", v, "Start at a mid “o” and glide towards “oo”, rounding the lips as you go.", "A single pure “o” with no glide.", ["go", "home", "road", "know", "though"]],
-    ["ai", "aɪ", "Long i", v, "Start with an open “ah” and glide up to “ee”.", "Cutting the glide short before voiceless consonants, as in “like” and “right”.", ["time", "like", "my", "right", "buy"]],
+    ["ai", "aɪ", "Long i", v, "Start with an open “ah” and glide up to “ee”.", "Dropping the glide, so “time” sounds like “tom”. Make sure the vowel moves up towards “ee”.", ["time", "like", "my", "right", "buy"]],
     ["v", "v", "v", c, "Rest your top teeth on your bottom lip and let voiced air buzz through.", "It becomes /b/ or /w/. The lips never close fully and never round.", ["very", "voice", "seven", "love", "have"]],
     ["w", "w", "w", c, "Round your lips tightly as for “oo”, then release quickly into the next vowel. The teeth are not involved.", "It becomes /v/, so “wine” sounds like “vine”.", ["we", "water", "away", "quick", "one"]],
     ["ng", "ŋ", "ng", c, "Raise the back of the tongue to the soft palate and send the sound through your nose. There is no g at the end.", "Adding a hard /g/ or /k/, or replacing it with /n/.", ["sing", "long", "thing", "singer", "going"]],
@@ -102,7 +104,11 @@ const ROWS: Record<string, Row[]> = {
     ["sj", "ɧ", "sj-sound", c, "Round your lips and blow, with friction further back than in English “sh”.", "A plain “sh”.", ["sju", "sjuk", "station", "stjärna", "skjorta"]],
     ["length", "ː", "Long and short", v, "Every stressed syllable is long: either a long vowel, or a short vowel followed by a long consonant.", "Equal lengths: “glas” is not “glass”.", ["glas", "glass", "vit", "vitt", "tak"]],
     ["u", "ʉː", "Swedish u", v, "Start from “ee”, then pout your lips forward tightly.", "Saying “oo”.", ["hus", "du", "nu", "sju", "ute"]],
-    ["pitch", "˥˩", "Pitch accent", m, "Many two-syllable words carry a second rise in pitch. It is what gives Swedish its sing-song tune.", "A flat English stress pattern.", ["flicka", "tala", "komma", "anden"]],
+    ["tj", "ɕ", "tj-sound", c, "Spread your lips and raise the middle of your tongue towards the hard palate, then let air slide through with a light hiss. It is a bright, soft sound, close to the “ś” of Polish, and it starts with no t.", "Saying English “ch” as in “church”, or mixing it up with the darker sj-sound. “Tjej” (girl) starts with a single smooth hiss, not “t-sh”.", ["tjej", "tjugo", "kind", "kyrka", "kärlek"]],
+    ["retroflex", "ʂ ʈ ɖ ɳ ɭ", "Retroflex rs, rt, rd, rn, rl", c, "When r meets s, t, d, n or l, the two sounds fuse into one. Curl the tongue tip back towards the roof of the mouth and make the s, t, d, n or l there. The r is not pronounced separately.", "Pronouncing a separate r followed by s, t, d, n or l. Some southern and Finland-Swedish accents do not use retroflex sounds, but in standard Swedish they are the norm.", ["först", "kort", "bord", "barn", "Karl"]],
+    ["y", "yː ʏ", "Swedish y", v, "Say “ee” and, without moving your tongue, round your lips tightly, as in German ü.", "Saying “ee” or “oo”. “Ny” (new) and “ni” (you, plural) are different words.", ["ny", "by", "dyr", "syster", "lyssna"]],
+    ["o", "øː œ", "Swedish ö", v, "Say a close-mid “e” (as in German “Tee”) held long, and round your lips without moving your tongue. It is the vowel of German ö and French “peu”. Before r it opens to /œ/, as in “göra” and “höra”.", "Replacing it with “o” or an English “er”.", ["öl", "öga", "höst", "göra", "dö"]],
+    ["pitch", "˥˩", "Pitch accent", m, "Every Swedish word has one of two pitch patterns (accent 1 or accent 2), which is a large part of Swedish melody. Accent 2 words, such as most compounds and many two-syllable words, have a second pitch peak.", "A flat English stress pattern.", ["flicka", "tala", "komma", "anden"]],
   ],
   pl: [
     ["sz", "ʂ ɕ", "sz and ś", c, "For sz, cz and ż the tongue tip pulls back and the sound is dark. For ś, ć and ź the middle of the tongue rises and the sound is bright.", "Using one English “sh” for both series.", ["szkoła", "siedem", "cześć", "życie", "źle"]],
@@ -162,6 +168,55 @@ const ROWS: Record<string, Row[]> = {
   ],
 };
 
+/** Longer notes for the public guide pages, keyed by sound id. Only facts we are confident about. */
+const EXTRA: Record<string, string[]> = {
+  "sv-sj": [
+    "The sj-sound is spelled in several ways: sj (sjö), stj (stjärna), skj (skjorta), sch in loanwords (schema), -tion (station), and sk before e, i, y, ä and ö (sked, skina). Its exact pronunciation varies a lot between regions and speakers, so aim for a clear friction sound made further back than English “sh”, with rounded lips.",
+    "Do not confuse it with the tj-sound. Sj is dark and made with rounded lips; tj is bright and made with spread lips and the middle of the tongue.",
+  ],
+  "sv-tj": [
+    "The tj-sound is spelled tj (tjej), kj (kjol), and k before the front vowels e, i, y, ä and ö (kind, kyrka, kärlek). Before back vowels k stays a plain /k/ (katt, kopp).",
+  ],
+  "sv-length": [
+    "In a stressed syllable Swedish has either a long vowel followed by a short consonant (glas, vit) or a short vowel followed by a long consonant (glass, vitt). A short vowel plus a short consonant does not occur. The doubled letter tells you the consonant is long, and the vowel before it is short.",
+    "The vowel quality often changes with length too, so do not rely on length alone: listen for both.",
+  ],
+  "sv-u": [
+    "Swedish u, y and ö are three distinct rounded vowels. Learners often merge u with y, so check your lip shape and tongue position for each, and listen to the reference voice.",
+  ],
+  "sv-pitch": [
+    "Swedish has two word accents. In Central Swedish, accent 1 has a single fall in pitch across the word, while accent 2 has two peaks, a double falling pattern. The accent can change meaning: “anden” is the duck with accent 1 and the spirit with accent 2; “tomten” is the plot of land (1) or the gnome (2); “buren” is the cage (1) or carried (2). Such pairs are fairly few. Accent patterns differ between regions, and learners are understood well even before they master them.",
+  ],
+  "en-th": [
+    "Spelling helps: th is voiceless in most content words (think, three, bath) and voiced in function words (the, this, that, they, there) and between vowels (mother, weather).",
+  ],
+  "en-dh": [
+    "The voiced th appears in some of the most frequent words in English (the, this, that, they, them, there), so a substitution is heard constantly even in a short sentence.",
+  ],
+  "en-r": [
+    "In American English the r also colours the vowel before it, as in “car” and “bird”. In many British accents the r is dropped after a vowel unless another vowel follows, so “car” ends in a vowel.",
+  ],
+  "en-ih": [
+    "The two sounds differ in quality as well as length: /iː/ is higher and tenser than /ɪ/. Aim for both; length on its own is not a reliable cue, especially before voiceless consonants.",
+  ],
+  "en-schwa": [
+    "In connected speech many small words weaken to schwa: “to” /tə/, “of” /əv/, “and” /ən/, “for” /fər/, “can” /kən/. Reducing them is a big part of sounding rhythmic in English.",
+  ],
+  "en-ptk": [
+    "The puff only happens at the start of a stressed syllable. After s there is none: “spin”, “stop” and “sky” use plain /p/, /t/ and /k/.",
+  ],
+  "en-final": [
+    "The vowel before a voiced final consonant is longer than before a voiceless one: the vowel in “bed” is longer than in “bet”. That extra length is often what listeners use to tell them apart.",
+  ],
+  "en-ng": [
+    "Ng is a single sound written with two letters. In “think” the n is also /ŋ/, followed by /k/: /θɪŋk/.",
+  ],
+  "en-stress": [
+    "Suffixes move stress in predictable ways. It falls on the syllable before -tion and -ic (education, photographic), which is why “photograph” and “photography” sound so different.",
+    "Some two-syllable words change stress with their role: a REcord (noun) and to reCORD (verb); the same goes for present, import and increase.",
+  ],
+};
+
 export const SOUNDS: Sound[] = Object.entries(ROWS).flatMap(([lang, rows]) =>
   rows.map(([slug, symbol, name, kind, how, watch, words]) => ({
     id: `${lang}-${slug}`,
@@ -172,8 +227,15 @@ export const SOUNDS: Sound[] = Object.entries(ROWS).flatMap(([lang, rows]) =>
     how,
     watch,
     words,
+    extra: EXTRA[`${lang}-${slug}`],
   })),
 );
+
+/** The part of a sound id after the language code: the last segment of its public URL. */
+export const soundSlug = (s: Sound): string => s.id.slice(s.lang.length + 1);
+
+export const soundBySlug = (lang: string, slug: string): Sound | undefined =>
+  SOUNDS.find((s) => s.lang === lang && soundSlug(s) === slug);
 
 export const soundsFor = (lang: string): Sound[] => SOUNDS.filter((s) => s.lang === lang);
 

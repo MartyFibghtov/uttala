@@ -1,10 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { Check, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { authClient } from "@/lib/auth-client";
+import { claimNudge, snoozeNudges } from "@/lib/store";
 import {
   formatPrice,
   perMonth,
@@ -48,8 +51,26 @@ interface Props {
   paidOnly?: boolean;
 }
 
-export function Pricing({ currentPlan, trialAvailable = true, paidOnly }: Props) {
-  const [interval, setInterval] = useState<Interval>("year");
+export function Pricing({ currentPlan: planProp, trialAvailable: trialProp = true, paidOnly }: Props) {
+  // The public pricing page is static, so it finds out on the client whether the visitor is signed in.
+  const [detected, setDetected] = useState<{ plan: PlanId; trial: boolean } | null>(null);
+  useEffect(() => {
+    if (planProp !== undefined) return;
+    let cancelled = false;
+    // get-session answers 200 with null when signed out, so visitors see no failed request.
+    authClient
+      .getSession()
+      .then(({ data }) => (data?.user ? fetch("/api/me") : null))
+      .then((r) => (r?.ok ? (r.json() as Promise<{ plan?: PlanId; trialAvailable?: boolean }>) : null))
+      .then((m) => !cancelled && m?.plan && setDetected({ plan: m.plan, trial: m.trialAvailable !== false }))
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [planProp]);
+  const currentPlan = planProp ?? detected?.plan;
+  const trialAvailable = planProp !== undefined ? trialProp : (detected?.trial ?? true);
+  const [interval, setInterval] = useState<Interval>(currentPlan !== undefined ? "month" : "year");
   const [caps, setCaps] = useState<Capabilities | null>(null);
   const [pending, setPending] = useState<PlanId | null>(null);
   const signedIn = currentPlan !== undefined;
@@ -118,7 +139,7 @@ export function Pricing({ currentPlan, trialAvailable = true, paidOnly }: Props)
               key={id}
               className={cn(
                 "relative flex flex-col rounded-2xl border bg-card p-6",
-                popular && "border-transparent shadow-lg ring-2 ring-foreground",
+                popular && "card-featured",
               )}
             >
               {popular && (
@@ -193,6 +214,88 @@ export function Pricing({ currentPlan, trialAvailable = true, paidOnly }: Props)
           ? "Payments are not switched on for this site yet."
           : `Paid plans start with a ${TRIAL_DAYS}-day free trial for new subscribers. Cancel any time in two clicks. Prices in US dollars; tax may be added at checkout.`}
       </p>
+    </div>
+  );
+}
+
+/** The honest one-liner shown with every in-app upgrade prompt: what it costs, the trial, how to leave. */
+export function plusTerms(trialAvailable: boolean): string {
+  const plus = PLANS.plus;
+  const price = `${formatPrice(plus.price.month)} a month or ${formatPrice(plus.price.year)} a year`;
+  return trialAvailable
+    ? `Plus: ${TRIAL_DAYS} days free, then ${price}. Cancel anytime in two clicks, before the trial ends and you pay nothing.`
+    : `Plus: ${price}. Cancel anytime in two clicks.`;
+}
+
+/**
+ * Lets one unprompted upgrade card show per day at most, and none for a week after the learner dismisses one.
+ * The state lives in this browser only. Cards the learner asks for themselves (a locked button, a reached
+ * limit) do not use this.
+ */
+export function useNudge(kind: string, when: boolean): { visible: boolean; dismiss: () => void } {
+  const [dismissed, setDismissed] = useState(false);
+  // Read from this browser's storage; the server render and hydration see "hidden".
+  const allowed = useSyncExternalStore(
+    () => () => undefined,
+    () => when && claimNudge(kind),
+    () => false,
+  );
+  return {
+    visible: allowed && !dismissed,
+    dismiss: () => {
+      snoozeNudges(7);
+      setDismissed(true);
+    },
+  };
+}
+
+/**
+ * A calm upgrade card for a moment where Plus is directly useful. It says what Plus adds, what it costs and
+ * how to leave, and "Not now" is always as visible as the main button.
+ */
+export function UpgradeCard({
+  title,
+  children,
+  currentPlan = "free",
+  trialAvailable = true,
+  onDismiss,
+  ctaLabel,
+  className,
+}: {
+  title: string;
+  /** What Plus would add here, ideally with something concrete from the learner's own session. */
+  children: React.ReactNode;
+  currentPlan?: PlanId;
+  trialAvailable?: boolean;
+  onDismiss?: () => void;
+  ctaLabel?: string;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className={cn("rounded-xl border bg-card p-4", className)}>
+      <p className="text-sm font-medium">{title}</p>
+      <div className="mt-1 space-y-2 text-sm leading-relaxed text-muted-foreground">{children}</div>
+      <p className="mt-3 text-xs text-muted-foreground">{plusTerms(trialAvailable)}</p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button size="sm" className="rounded-full" onClick={() => setOpen(true)}>
+          {ctaLabel ?? (trialAvailable ? `Try Plus free for ${TRIAL_DAYS} days` : "See Plus")}
+        </Button>
+        {onDismiss && (
+          <Button size="sm" variant="ghost" className="rounded-full" onClick={onDismiss}>
+            Not now
+          </Button>
+        )}
+      </div>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle className="text-xl">{title}</DialogTitle>
+            <DialogDescription>Compare the plans and choose. You can stay on Free as long as you like.</DialogDescription>
+          </DialogHeader>
+          <Pricing currentPlan={currentPlan} trialAvailable={trialAvailable} paidOnly />
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

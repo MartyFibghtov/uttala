@@ -3,6 +3,7 @@ import { cn } from "@/lib/utils";
 
 export const ARTWORKS = {
   heroAcoustic: { src: "/images/hero-acoustic.jpg", width: 1376, height: 768 },
+  authAcoustic: { src: "/images/auth-acoustic.jpg", width: 1920, height: 2560 },
   stepListen: { src: "/images/step-listen.jpg", width: 1200, height: 896 },
   stepRecord: { src: "/images/step-record.jpg", width: 1200, height: 896 },
   stepFix: { src: "/images/step-fix.jpg", width: 1200, height: 896 },

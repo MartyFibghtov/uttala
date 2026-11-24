@@ -1,7 +1,7 @@
 /**
  * Score by deduction: every sentence starts at 100 and every mistake the checks catch costs points.
  *
- * The evidence comes from the on-device sound model (gop.ts: each expected sound's confidence on the
+ * The evidence comes from the sound model (gop.ts: each expected sound's confidence on the
  * learner's audio), the engine's word verdicts (Azure / ElevenLabs) and the prosody comparison
  * (prosody.ts: pauses, rhythm, melody against the native reading). Nothing is averaged away: three
  * wrong sounds cost three times one wrong sound, whatever the rest of the sentence did.
@@ -71,6 +71,22 @@ export const NATIVE_LEVEL: Record<string, NativeLevel> = {
   sv: { soundWeak: -3.83, soundWrong: -7.02, rhythm: 35, intonation: 46 },
 };
 const DEFAULT_LEVEL: NativeLevel = { soundWeak: -2.3, soundWrong: -5.7, rhythm: 45, intonation: 50 };
+
+/** Return the calibrated native baseline thresholds for a language. */
+export function nativeLevelFor(lang: string): NativeLevel {
+  return NATIVE_LEVEL[lang] ?? DEFAULT_LEVEL;
+}
+
+/**
+ * Re-anchor a raw prosody measure (0–100) onto the same native-calibrated 0–100 scale
+ * used by overall scores and deductions, where `nativeFloor` maps to 90.
+ */
+export function nativeProsodyScore(raw: number, nativeFloor: number): number {
+  if (raw >= nativeFloor) {
+    return Math.min(100, Math.round(90 + ((raw - nativeFloor) / Math.max(1, 100 - nativeFloor)) * 10));
+  }
+  return Math.max(0, Math.round((raw / Math.max(1, nativeFloor)) * 90));
+}
 
 /**
  * Mistakes cost a share of the sentence, so a long sentence is not punished for having more sounds: the

@@ -4,14 +4,33 @@ import { tokenize } from "../text";
 import type { TimedChar, TtsResponse, Voice, VoiceRole } from "../types";
 import { db, first } from "./db";
 
-const BASE = "https://api.elevenlabs.io";
+const BASE = process.env.ELEVENLABS_API_BASE ?? "https://api.elevenlabs.io";
 const key = () => process.env.ELEVENLABS_API_KEY ?? "";
 
 export const hasElevenLabs = () => key().length > 0;
 
+class ElevenLabsError extends Error {
+  constructor(message: string, public status: number) {
+    super(message);
+  }
+}
+
 async function fail(res: Response, what: string): Promise<never> {
   const body = await res.text().catch(() => "");
-  throw new Error(`ElevenLabs ${what} failed (${res.status}): ${body.slice(0, 300)}`);
+  throw new ElevenLabsError(`ElevenLabs ${what} failed (${res.status}): ${body.slice(0, 300)}`, res.status);
+}
+
+const isTransientError = (err: unknown): boolean =>
+  err instanceof ElevenLabsError ? err.status === 429 || err.status >= 500 : true;
+
+async function retryTransient<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    if (!isTransientError(err)) throw err;
+    await new Promise((r) => setTimeout(r, 400));
+    return fn();
+  }
 }
 
 const ROLE_BY_USE_CASE: Record<string, VoiceRole> = {
@@ -254,12 +273,15 @@ const modelSupportsLanguageCode = (model: string) =>
   model.includes("v3") ||
   model.includes("v4");
 
-const cacheKey = (voice: string, text: string, lang = "en") =>
-  createHash("sha256").update(`v4|${ttsModel()}|${lang}|${voice}|${text}`).digest("hex");
+const cacheKey = (voice: string, text: string, lang = "en", isolated = false) =>
+  createHash("sha256")
+    .update(`${isolated ? "v5" : "v4"}|${ttsModel()}|${lang}|${voice}|${text}`)
+    .digest("hex");
 
 /** Look for an already generated reading: this server's memory first, then the database. */
 export async function cachedSpeech(voice: string, text: string, lang = "en"): Promise<TtsResponse | null> {
-  const k = cacheKey(voice, text, lang);
+  const { isolated } = prepareTtsPrompt(text, lang);
+  const k = cacheKey(voice, text, lang, isolated);
   const hit = memory.get(k);
   if (hit) return hit;
   const row = await first<{ audio: string; chars: string }>("SELECT audio, chars FROM tts_cache WHERE key = ?", [k]);
@@ -274,35 +296,33 @@ function remember(k: string, value: TtsResponse) {
   memory.set(k, value);
 }
 
-const NATIVE_CITATION_CONTEXT: Record<string, { prev: string; next: string }> = {
-  en: { prev: "Dictionary pronunciation guide. Speak the following standalone word clearly:", next: "." },
-  es: { prev: "Guía de pronunciación. Pronuncia claramente la siguiente palabra:", next: "." },
-  fr: { prev: "Guide de prononciation. Prononcez clairement le mot suivant :", next: "." },
-  de: { prev: "Ausspracheführer. Sprich das folgende Wort deutlich aus:", next: "." },
-  it: { prev: "Guida alla pronuncia. Pronuncia chiaramente la seguente parola:", next: "." },
-  pt: { prev: "Guia de pronúncia. Pronuncie claramente a seguinte palavra:", next: "." },
-  nl: { prev: "Uitspraakgids. Spreek het volgende woord duidelijk uit:", next: "." },
-  sv: { prev: "Uttalsguide. Uttala följande ord tydligt:", next: "." },
-  pl: { prev: "Przewodnik wymowy. Wymów wyraźnie następujące słowo:", next: "." },
-  uk: { prev: "Словникова вимова. Чітко вимовте наступне слово:", next: "." },
-  ru: { prev: "Словарь произношения. Чётко произнесите следующее слово:", next: "." },
-  tr: { prev: "Telaffuz rehberi. Aşağıdaki kelimeyi net bir şekilde söyleyin:", next: "." },
-  ja: { prev: "発音ガイド。次の単語をはっきりと発音してください：", next: "。" },
-  zh: { prev: "发音指南。请清晰地读出以下词语：", next: "。" },
-  ko: { prev: "발음 가이드. 다음 단어를 명확하게 발음하세요:", next: "." },
-  ar: { prev: "دليل النطق. انطق الكلمة التالية بوضوح:", next: "." },
-  hi: { prev: "उच्चारण मार्गदर्शिका। निम्नलिखित शब्द का स्पष्ट उच्चारण करें:", next: "।" },
+const NATIVE_CITATION_CONTEXT: Record<string, string> = {
+  en: "Dictionary pronunciation guide. Speak the following standalone word clearly:",
+  es: "Guía de pronunciación. Pronuncia claramente la siguiente palabra:",
+  fr: "Guide de prononciation. Prononcez clairement le mot suivant :",
+  de: "Ausspracheführer. Sprich das folgende Wort deutlich aus:",
+  it: "Guida alla pronuncia. Pronuncia chiaramente la seguente parola:",
+  pt: "Guia de pronúncia. Pronuncie claramente a seguinte palavra:",
+  nl: "Uitspraakgids. Spreek het volgende woord duidelijk uit:",
+  sv: "Uttalsguide. Uttala följande ord tydligt:",
+  pl: "Przewodnik wymowy. Wymów wyraźnie następujące słowo:",
+  uk: "Словникова вимова. Чітко вимовте наступне слово:",
+  ru: "Словарь произношения. Чётко произнесите следующее слово:",
+  tr: "Telaffuz rehberi. Aşağıdaki kelimeyi net bir şekilde söyleyin:",
+  ja: "発音ガイド。次の単語をはっきりと発音してください：",
+  zh: "发音指南。请清晰地读出以下词语：",
+  ko: "발음 가이드. 다음 단어를 명확하게 발음하세요:",
+  ar: "دليل النطق. انطق الكلمة التالية بوضوح:",
+  hi: "उच्चारण मार्गदर्शिका। निम्नलिखित शब्द का स्पष्ट उच्चारण करें:",
 };
 
 /**
  * Prepare text for synthesis so single words / isolated drill items are spoken with
- * complete, standalone dictionary citation intonation instead of sounding like a
- * mid-sentence fragment.
+ * complete, standalone dictionary citation intonation without abbreviation expansion.
  */
 function prepareTtsPrompt(text: string, lang = "en"): {
   promptText: string;
   isolated: boolean;
-  appendedStop: string;
 } {
   const trimmed = text.trim().replace(/^[,;:\-–—]+|[,;:\-–—]+$/g, "").trim() || text.trim();
   const tokens = tokenize(trimmed, lang);
@@ -310,18 +330,12 @@ function prepareTtsPrompt(text: string, lang = "en"): {
   const isolated = tokens.length <= 2 && (tokens.length === 1 || (!hasTerminalPunct && trimmed.length <= 24));
 
   if (!isolated) {
-    return { promptText: text, isolated: false, appendedStop: "" };
+    return { promptText: text, isolated: false };
   }
 
-  const stop = lang === "ja" || lang === "zh" ? "。" : lang === "hi" ? "।" : ".";
-  const glyphs = Array.from(trimmed);
-  const capitalized =
-    glyphs.length > 0 ? glyphs[0].toLocaleUpperCase(lang) + glyphs.slice(1).join("") : trimmed;
-  const promptText = hasTerminalPunct ? capitalized : `${capitalized}${stop}`;
   return {
-    promptText,
+    promptText: trimmed,
     isolated: true,
-    appendedStop: hasTerminalPunct ? "" : stop,
   };
 }
 
@@ -331,7 +345,7 @@ function prepareTtsPrompt(text: string, lang = "en"): {
  * library, whose size is bounded, so each text is only ever paid for once.
  */
 export async function synthesize(text: string, voice: string, persist: boolean, lang = "en"): Promise<TtsResponse> {
-  const { promptText, isolated, appendedStop } = prepareTtsPrompt(text, lang);
+  const { promptText, isolated } = prepareTtsPrompt(text, lang);
   const model = ttsModel();
 
   const payload: Record<string, unknown> = {
@@ -355,9 +369,10 @@ export async function synthesize(text: string, voice: string, persist: boolean, 
       ...(supportsStyleAndBoost ? { style: 0.0, use_speaker_boost: true } : {}),
     };
     if (!isV3) {
-      const ctx = NATIVE_CITATION_CONTEXT[lang] ?? NATIVE_CITATION_CONTEXT.en;
-      payload.previous_text = ctx.prev;
-      payload.next_text = ctx.next;
+      payload.previous_text = NATIVE_CITATION_CONTEXT[lang] ?? NATIVE_CITATION_CONTEXT.en;
+      if (!/\d/.test(promptText)) {
+        payload.apply_text_normalization = "off";
+      }
     }
   } else {
     // Moderate stability gives sentences natural lexical stress, question pitch rises, and cadence
@@ -388,7 +403,7 @@ export async function synthesize(text: string, voice: string, persist: boolean, 
     } | null;
   };
   const a = data.alignment;
-  let chars: TimedChar[] = a
+  const chars: TimedChar[] = a
     ? a.characters.map((c, i) => ({
         c,
         s: a.character_start_times_seconds[i],
@@ -396,17 +411,8 @@ export async function synthesize(text: string, voice: string, persist: boolean, 
       }))
     : [];
 
-  // Strip the synthetic terminal stop added for citation prosody so character alignment matches `text`.
-  if (appendedStop && chars.length > 0 && chars[chars.length - 1].c === appendedStop) {
-    chars = chars.slice(0, -1);
-  }
-  const origFirst = Array.from(text.trim())[0];
-  if (isolated && origFirst && chars.length > 0) {
-    chars[0] = { ...chars[0], c: origFirst };
-  }
-
   const out: TtsResponse = { audio: data.audio_base64, mime: "audio/mpeg", chars, voiceId: voice };
-  const k = cacheKey(voice, text, lang);
+  const k = cacheKey(voice, text, lang, isolated);
   remember(k, out);
   if (persist) {
     void db()
@@ -427,26 +433,28 @@ export interface ForcedAlignment {
 
 /** Align the known target text to the learner's audio. */
 export async function forcedAlign(audio: Blob, text: string): Promise<ForcedAlignment> {
-  const form = new FormData();
-  form.append("file", audio, "speech.wav");
-  form.append("text", text);
-  const res = await fetch(`${BASE}/v1/forced-alignment`, {
-    method: "POST",
-    headers: { "xi-api-key": key() },
-    body: form,
-    signal: AbortSignal.timeout(10_000),
+  return retryTransient(async () => {
+    const form = new FormData();
+    form.append("file", audio, "speech.wav");
+    form.append("text", text);
+    const res = await fetch(`${BASE}/v1/forced-alignment`, {
+      method: "POST",
+      headers: { "xi-api-key": key() },
+      body: form,
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (!res.ok) await fail(res, "forced alignment");
+    const data = (await res.json()) as {
+      characters: { text: string; start: number; end: number }[];
+      words: { text: string; start: number; end: number; loss?: number }[];
+      loss?: number;
+    };
+    return {
+      chars: data.characters.map((c) => ({ c: c.text, s: c.start, e: c.end })),
+      words: data.words.map((w) => ({ ...w, loss: w.loss ?? 0 })),
+      loss: data.loss ?? 0,
+    };
   });
-  if (!res.ok) await fail(res, "forced alignment");
-  const data = (await res.json()) as {
-    characters: { text: string; start: number; end: number }[];
-    words: { text: string; start: number; end: number; loss?: number }[];
-    loss?: number;
-  };
-  return {
-    chars: data.characters.map((c) => ({ c: c.text, s: c.start, e: c.end })),
-    words: data.words.map((w) => ({ ...w, loss: w.loss ?? 0 })),
-    loss: data.loss ?? 0,
-  };
 }
 
 export interface Transcript {
@@ -456,26 +464,33 @@ export interface Transcript {
 
 /** Open transcription: what a listener with no script actually hears. */
 export async function transcribe(audio: Blob, lang: string): Promise<Transcript> {
-  const form = new FormData();
-  form.append("file", audio, "speech.wav");
-  form.append("model_id", process.env.ELEVENLABS_STT_MODEL ?? "scribe_v2");
-  form.append("language_code", lang);
-  form.append("timestamps_granularity", "word");
-  form.append("tag_audio_events", "false");
-  form.append("diarize", "false");
-  const res = await fetch(`${BASE}/v1/speech-to-text`, {
-    method: "POST",
-    headers: { "xi-api-key": key() },
-    body: form,
-    signal: AbortSignal.timeout(10_000),
+  return retryTransient(async () => {
+    const form = new FormData();
+    form.append("file", audio, "speech.wav");
+    form.append("model_id", process.env.ELEVENLABS_STT_MODEL ?? "scribe_v2");
+    form.append("language_code", lang);
+    form.append("timestamps_granularity", "word");
+    form.append("tag_audio_events", "false");
+    form.append("diarize", "false");
+    const res = await fetch(`${BASE}/v1/speech-to-text`, {
+      method: "POST",
+      headers: { "xi-api-key": key() },
+      body: form,
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (!res.ok) await fail(res, "speech-to-text");
+    const data = (await res.json()) as {
+      text: string;
+      words?: { text: string; start: number; end: number; type?: string; logprob?: number }[];
+    };
+    const wordItems = (data.words ?? []).filter((w) => !w.type || w.type === "word");
+    const words =
+      wordItems.length === 0 && data.text?.trim()
+        ? tokenize(data.text, lang).map((t) => ({ text: t.text, start: 0, end: 0 }))
+        : wordItems;
+    return {
+      text: data.text,
+      words,
+    };
   });
-  if (!res.ok) await fail(res, "speech-to-text");
-  const data = (await res.json()) as {
-    text: string;
-    words?: { text: string; start: number; end: number; type?: string; logprob?: number }[];
-  };
-  return {
-    text: data.text,
-    words: (data.words ?? []).filter((w) => !w.type || w.type === "word"),
-  };
 }

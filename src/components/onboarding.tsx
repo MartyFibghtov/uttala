@@ -2,9 +2,9 @@
 
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { ArrowLeft, ArrowRight, Check, Ear, Music, Sparkles, Timer, Volume2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Ear, Loader2, Music, Sparkles, Timer, Volume2 } from "lucide-react";
 import { toast } from "sonner";
-import { Logo } from "@/components/app-shell";
+import { Logo } from "@/components/logo";
 import {
   buildSimulatedTake,
   DiagnosticStageRecorder,
@@ -12,18 +12,17 @@ import {
   rankForScore,
   ScoringAndPlanScreen,
   SpeechLevelRankingScreen,
-  WordPracticeLessonScreen,
   type DiagnosticTake,
 } from "@/components/diagnostic-lesson";
 import { Orb } from "@/components/orb";
 import { loadReference } from "@/components/practice-session";
-import { Pricing } from "@/components/pricing";
 import { Button } from "@/components/ui/button";
 import { useAccount } from "@/hooks/use-account";
 import { play } from "@/lib/audio";
 import { diagnosticPromptsFor, getLanguage, LANGUAGES } from "@/lib/languages";
 import { LEVEL_IDS, LEVELS } from "@/lib/levels";
 import { MINIMAL_PAIRS } from "@/lib/minimal-pairs";
+import { pillarScores } from "@/lib/prosody";
 import { addCheckpoint } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
@@ -36,9 +35,7 @@ type Step =
   | "test-melody"
   | "ranking"
   | "breakdown"
-  | "scale"
-  | "practice"
-  | "plan";
+  | "scale";
 
 const TEST_STEPS: Step[] = ["test-sounds", "test-rhythm", "test-melody"];
 
@@ -181,7 +178,6 @@ function Lesson({ lang }: { lang: string }) {
 export function Onboarding() {
   const router = useRouter();
   const { me, updateProfile } = useAccount();
-  const offerPlan = me.billing && me.plan === "free";
   const steps: Step[] = [
     "language",
     "level",
@@ -192,8 +188,6 @@ export function Onboarding() {
     "ranking",
     "breakdown",
     "scale",
-    "practice",
-    ...(offerPlan ? (["plan"] as Step[]) : []),
   ];
   const [index, setIndex] = useState(0);
   const [takesByLang, setTakesByLang] = useState<Record<string, (DiagnosticTake | undefined)[]>>({});
@@ -232,7 +226,8 @@ export function Onboarding() {
       completedTakes.reduce((s, t) => s + t.attempt.overall, 0) / Math.max(1, completedTakes.length),
     );
     const avgAccuracy = Math.round(
-      completedTakes.reduce((s, t) => s + t.result.scores.accuracy, 0) / Math.max(1, completedTakes.length),
+      completedTakes.reduce((s, t) => s + pillarScores(t.result, t.prosody, lang).sounds, 0) /
+        Math.max(1, completedTakes.length),
     );
     const avgIntel = Math.round(
       completedTakes.reduce((s, t) => s + t.result.scores.intelligibility, 0) / Math.max(1, completedTakes.length),
@@ -246,7 +241,12 @@ export function Onboarding() {
       intelligibility: avgIntel,
       recommended: rank.recommended,
     });
-    await updateProfile({ onboarded: true });
+    const saved = await updateProfile({ onboarded: true });
+    if (!saved) {
+      setFinishing(false);
+      toast.error("We could not save your setup. Check your connection and try again.");
+      return;
+    }
     router.replace("/home");
   };
 
@@ -290,17 +290,11 @@ export function Onboarding() {
     ],
     scale: [
       "How scoring works & your first lesson",
-      "Every word and sound is scored from 0 to 100, and your weakest words are queued up to practise.",
-    ],
-    practice: [
-      "Practise your focus words",
-      "Try each word from your assessment on its own and watch your score climb.",
-    ],
-    plan: [
-      "Keep going on Free, or unlock everything",
-      "You can decide later. Nothing is charged during a trial.",
+      "Every word and sound is scored from 0 to 100. Your focus words are queued in the app — press Start to begin.",
     ],
   };
+
+  const isLast = index === steps.length - 1;
 
   const nextButtonLabel = () => {
     if (step === "lesson") return "Start 3-part scan";
@@ -309,15 +303,13 @@ export function Onboarding() {
     if (step === "test-melody") return "See my pronunciation rank";
     if (step === "ranking") return "See what was good & bad";
     if (step === "breakdown") return "How scoring works";
-    if (step === "scale") return "Practise my focus words";
-    if (step === "practice") return offerPlan ? "Continue" : "Finish & go to Today's Plan";
-    if (step === "plan") return "Continue with Free";
-    return index === steps.length - 1 ? "Start practising" : "Continue";
+    if (step === "scale") return "Start";
+    return "Continue";
   };
 
   return (
     <div className="aurora-wash min-h-dvh">
-      <div className={cn("mx-auto px-4 py-6 md:px-8", step === "plan" ? "max-w-5xl" : "max-w-4xl")}>
+      <div className="mx-auto max-w-4xl px-4 py-6 md:px-8">
         <div className="flex items-center justify-between gap-4">
           <Logo href="/onboarding" />
           <div className="flex items-center gap-1.5" aria-label={`Step ${index + 1} of ${steps.length}`}>
@@ -398,10 +390,6 @@ export function Onboarding() {
           {step === "breakdown" && <GoodAndBadBreakdownScreen takes={completedTakes} lang={lang} />}
 
           {step === "scale" && <ScoringAndPlanScreen takes={completedTakes} lang={lang} />}
-
-          {step === "practice" && <WordPracticeLessonScreen takes={completedTakes} lang={lang} />}
-
-          {step === "plan" && <Pricing currentPlan={me.plan} trialAvailable={me.trialAvailable} />}
         </div>
 
         <div className="mt-8 flex flex-wrap items-center justify-between gap-3 pb-10">
@@ -421,9 +409,14 @@ export function Onboarding() {
               </Button>
             )}
             {(testStageIndex < 0 || Boolean(currentStageTake)) && (
-              <Button className="rounded-full" onClick={next} disabled={finishing}>
+              <Button
+                size={isLast ? "lg" : "default"}
+                className={cn("rounded-full", isLast && "premium-glow px-6")}
+                onClick={next}
+                disabled={finishing}
+              >
                 {nextButtonLabel()}
-                <ArrowRight />
+                {finishing ? <Loader2 className="animate-spin" /> : <ArrowRight />}
               </Button>
             )}
           </div>
